@@ -1,0 +1,26 @@
+# Ambientes virtuais
+.venv/
+venv/
+ENV/
+
+# Bytecode e caches Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Testes e ferramentas de análise
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# Empacotamento e build
+build/
+dist/
+*.egg-info/
+
+# IDEs e caches locais
+.vscode/
+.idea/
+.antigravity/
