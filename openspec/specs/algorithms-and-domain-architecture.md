@@ -1,7 +1,7 @@
 ---
 id: "algorithms-and-domain-architecture"
 title: "Algorithms and Domain Architecture — Classic vs. Adapted Solvers"
-version: "1.0.0"
+version: "1.1.0"
 status: "active"
 owners:
   - "@allysson-assuncao"
@@ -97,24 +97,23 @@ class IntervalSchedulerProtocol(Protocol):
 Both classic algorithms serve as permanent comparative baselines reflecting standard textbook behavior before authorial adaptation.
 
 ### 3.1. `ClassicGreedyScheduler` ($\mathcal{O}(n \log n)$ / $\mathcal{O}(n)$ pre-sorted)
-- **Compatibility Criterion**: Standard interval overlap only ($s_j \ge f_i$); ignores biological contamination ($c_i$) and shift-change rules, or operates on `[s_i, f_i]` directly (with optional horizon filter $f_i \le H$ only when comparing classic boundary handling—explicitly documented as ignoring sterilization/shift rules or documented as two explicit comparison modes: pure textbook classic vs. naive static reduction $f'_i = f_i + c_i$).
-  - Specifically, the repository exposes:
-    1. **Pure Classic Textbook Mode** (`ClassicGreedyScheduler`, `ClassicDPScheduler`): Uses strictly $[s_i, f_i]$ (respecting $f_i \le H$ if `shift_config` is supplied, without awareness of $c_i$ or passive sterilization overlap) to contrast textbook behavior directly against adapted behavior.
-    2. **Naive Static Reduction Helper** (optional comparative baseline mode or helper in comparative tests): Applies $f'_i = f_i + c_i$ before invoking classical scheduling, empirically demonstrating why static reduction fails the 3-surgery end-of-shift counterexample.
+- **Compatibility Criterion**: Operates strictly in **Pure Classic Textbook Mode** over active surgical intervals $[s_i, f_i]$ ($s_j \ge f_i$). It intentionally ignores `sterilization_duration` ($c_i$) and `shift_config` ($H$, $[A, B]$), setting `effective_release_time = request.finish_time` and `discarded_infeasible_count = 0`. *(The separate Naive Static Reduction comparator $f'_i = f_i + c_i$ with horizon filtering is paired with the adapted solvers for counterexample comparison.)*
 - **Steps**:
-  1. Unless `is_presorted=True`, sort surgeries by $(f_i, s_i)$ in $\mathcal{O}(n \log n)$.
-  2. Maintain `last_finish = -1`.
-  3. Linearly scan in $\mathcal{O}(n)$: if $s_i \ge \text{last\_finish}$, append surgery and update `last_finish = f_i`.
+  1. Validate caller sequence without mutating it (raising `InvalidSchedulingInputError` on invalid sequence or `None`).
+  2. Unless `is_presorted=True`, sort surgeries by $(f_i, s_i)$ in $\mathcal{O}(n \log n)$. When `is_presorted=True`, validate non-decreasing $(f_i, s_i)$ order in a single $\mathcal{O}(n)$ pass (raising `InvalidSchedulingInputError` if unsorted).
+  3. Maintain `last_finish = -1`.
+  4. Linearly scan in $\mathcal{O}(n)$: if $s_i \ge \text{last\_finish}$, append `ProcessedSurgery(request=i, effective_release_time=f_i)` and update `last_finish = f_i`.
 
 ### 3.2. `ClassicDPScheduler` ($\mathcal{O}(n \log n)$ / $\mathcal{O}(n)$ pre-sorted)
+- **Compatibility Criterion**: Pure Classic Textbook Mode over $[s_i, f_i]$ (identical to `ClassicGreedyScheduler`).
 - **Steps**:
-  1. Unless `is_presorted=True`, sort surgeries by $(f_i, s_i)$ in $\mathcal{O}(n \log n)$.
-  2. Build finish-time array $F = [f_1, \dots, f_n]$.
-  3. Compute predecessor array `p[1..n]`:
-     - Standard mode: For each $i$, find largest $j < i$ with $f_j \le s_i$ using `bisect.bisect_right(F, s_i, hi=i-1)` in $\mathcal{O}(n \log n)$.
-     - Pre-sorted mode (`is_presorted=True` when paired with start-order indices or monotonic pointer scan): Compute `p` in $\mathcal{O}(n)$.
-  4. Fill `dp[0..n]` where `dp[i] = max(dp[i - 1], 1 + dp[p[i]])` in $\mathcal{O}(n)$.
-  5. Reconstruct optimal subset by backtracking from $i = n$ to $1$ in $\mathcal{O}(n)$.
+  1. Validate caller sequence without mutating it.
+  2. Unless `is_presorted=True`, sort surgeries by $(f_i, s_i)$ in $\mathcal{O}(n \log n)$. When `is_presorted=True`, validate non-decreasing $(f_i, s_i)$ order in $\mathcal{O}(n)$.
+  3. Compute 1-based predecessor array `p[1..n]`:
+     - **Two-pointer $\mathcal{O}(n)$ mode**: If `is_presorted=True` and an optional `presorted_start_indices: Sequence[int] | None = None` permutation ordered by `start_time` is supplied (validated in $\mathcal{O}(n)$), OR if `start_time` is already monotonically non-decreasing across the finish-sorted sequence (checked in $\mathcal{O}(n)$), compute predecessors via monotonic two-pointer scan in $\mathcal{O}(n)$.
+     - **Binary-search $\mathcal{O}(n \log n)$ mode**: Otherwise, build finish-time array $F = [f_1, \dots, f_n]$ and compute $p(i)$ using `bisect.bisect_right(F, s_i, lo=0, hi=i)` in $\mathcal{O}(n \log n)$.
+  4. Fill `dp[0..n]` iteratively where `dp[i] = max(dp[i - 1], 1 + dp[p[i]])` in $\mathcal{O}(n)$.
+  5. Reconstruct optimal subset iteratively by backtracking from $i = n$ to $1$ in $\mathcal{O}(n)$.
 
 ---
 
@@ -226,3 +225,4 @@ escalonamento-intervalos-paa/
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-11-15 | `@allysson-assuncao` | Initial specification of domain models, SOLID contracts, classic baselines, adapted algorithms, and package layout |
+| 1.1.0 | 2026-11-15 | `@allysson-assuncao` | Consolidated `implement-classic-baseline`: finalized Pure Classic Textbook Mode, $\mathcal{O}(n)$ pre-sorted validation, and `presorted_start_indices` two-pointer DP predecessor contract |
