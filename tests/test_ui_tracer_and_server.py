@@ -491,3 +491,15 @@ class TestUiSecurityAndEdgeCases:
 
         app_js = Path("src/ui/static/app.js").read_text(encoding="utf-8")
         assert "innerHTML" not in app_js
+
+    def test_te07_hhmm_mask_and_client_time_validation_present(self) -> None:
+        """TE-07: Interface usa máscara automática HH:MM e bloqueia startTime >= finishTime."""
+        index_html = Path("src/ui/static/index.html").read_text(encoding="utf-8")
+        app_js = Path("src/ui/static/app.js").read_text(encoding="utf-8")
+
+        assert 'class="hhmm-input"' in index_html
+        assert 'id="new-start"' in index_html
+        assert 'id="new-finish"' in index_html
+        assert "attachHhmmInputMask" in app_js
+        assert "parseHhmmToMinutes" in app_js
+        assert "startTime >= finishTime" in app_js
