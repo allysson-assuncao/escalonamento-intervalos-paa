@@ -34,6 +34,42 @@ function formatMinutes(minutes) {
   return `${String(hrs).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
 }
 
+function normalizeHhmmDigits(digits) {
+  if (!digits) return "";
+  if (digits.length === 1) return `0${digits}:00`;
+  if (digits.length === 2) return `${digits}:00`;
+  if (digits.length === 3) return `0${digits[0]}:${digits.slice(1)}`;
+  return `${digits.slice(0, 2)}:${digits.slice(2, 4)}`;
+}
+
+function attachHhmmInputMask(inputEl) {
+  inputEl.addEventListener("input", () => {
+    const digits = inputEl.value.replace(/\D/g, "").slice(0, 4);
+    inputEl.value = digits.length > 2 ? `${digits.slice(0, 2)}:${digits.slice(2)}` : digits;
+  });
+
+  inputEl.addEventListener("blur", () => {
+    const digits = inputEl.value.replace(/\D/g, "").slice(0, 4);
+    if (digits.length > 0) {
+      inputEl.value = normalizeHhmmDigits(digits);
+    }
+  });
+}
+
+function parseHhmmToMinutes(rawValue, fieldLabel) {
+  const trimmed = String(rawValue || "").trim();
+  const match = /^(\d{1,2}):(\d{2})$/.exec(trimmed);
+  if (!match) {
+    throw new Error(`${fieldLabel} deve estar no formato HH:MM (ex: 12:30).`);
+  }
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (minutes > 59 || hours > 24 || (hours === 24 && minutes > 0)) {
+    throw new Error(`${fieldLabel} possui horário inválido (${trimmed}). Use entre 00:00 e 24:00.`);
+  }
+  return hours * 60 + minutes;
+}
+
 function createSvgElement(tag, attrs = {}) {
   const el = document.createElementNS(SVG_NS, tag);
   for (const [key, value] of Object.entries(attrs)) {
@@ -71,14 +107,31 @@ function readShiftConfigFromDom() {
   if (!shiftEnabled) {
     return null;
   }
-  const horizon = Number(document.getElementById("horizon-input").value);
+  const horizon = parseHhmmToMinutes(
+    document.getElementById("horizon-input").value,
+    "Horizonte H"
+  );
+  if (horizon <= 0) {
+    throw new Error("O horizonte H deve ser maior que 00:00.");
+  }
   const windowEnabled = document.getElementById("window-enabled-checkbox").checked;
   let shiftWindow = null;
   if (windowEnabled) {
-    shiftWindow = {
-      start: Number(document.getElementById("window-start-input").value),
-      end: Number(document.getElementById("window-end-input").value),
-    };
+    const winStart = parseHhmmToMinutes(
+      document.getElementById("window-start-input").value,
+      "Início A da janela"
+    );
+    const winEnd = parseHhmmToMinutes(
+      document.getElementById("window-end-input").value,
+      "Fim B da janela"
+    );
+    if (winStart >= winEnd) {
+      throw new Error("Na janela [A, B], o início A deve ser menor que o fim B.");
+    }
+    if (winEnd > horizon) {
+      throw new Error("O fim B da janela [A, B] não pode ultrapassar o horizonte H.");
+    }
+    shiftWindow = { start: winStart, end: winEnd };
   }
   return {
     closing_horizon: horizon,
@@ -104,14 +157,14 @@ function syncShiftConfigToDom(shiftConfig) {
 
   shiftCheckbox.checked = true;
   shiftFields.classList.remove("hidden");
-  horizonInput.value = String(shiftConfig.closing_horizon);
-  horizonHhmm.textContent = formatMinutes(shiftConfig.closing_horizon);
+  horizonInput.value = formatMinutes(shiftConfig.closing_horizon);
+  horizonHhmm.textContent = `${shiftConfig.closing_horizon} min`;
 
   if (shiftConfig.shift_window) {
     windowCheckbox.checked = true;
     windowFields.classList.remove("hidden");
-    document.getElementById("window-start-input").value = String(shiftConfig.shift_window.start);
-    document.getElementById("window-end-input").value = String(shiftConfig.shift_window.end);
+    document.getElementById("window-start-input").value = formatMinutes(shiftConfig.shift_window.start);
+    document.getElementById("window-end-input").value = formatMinutes(shiftConfig.shift_window.end);
   } else {
     windowCheckbox.checked = false;
     windowFields.classList.add("hidden");
@@ -859,9 +912,18 @@ async function initApp() {
   document.getElementById("window-enabled-checkbox").addEventListener("change", (e) => {
     document.getElementById("window-fields").classList.toggle("hidden", !e.target.checked);
   });
-  document.getElementById("horizon-input").addEventListener("input", (e) => {
-    const v = Number(e.target.value);
-    document.getElementById("horizon-hhmm").textContent = Number.isFinite(v) && v >= 0 ? formatMinutes(v) : "--:--";
+  document.querySelectorAll(".hhmm-input").forEach(attachHhmmInputMask);
+
+  document.getElementById("horizon-input").addEventListener("input", () => {
+    try {
+      const minutes = parseHhmmToMinutes(
+        document.getElementById("horizon-input").value,
+        "Horizonte H"
+      );
+      document.getElementById("horizon-hhmm").textContent = `${minutes} min`;
+    } catch {
+      document.getElementById("horizon-hhmm").textContent = "-- min";
+    }
   });
 
   document.getElementById("new-type").addEventListener("change", (e) => {
@@ -873,19 +935,59 @@ async function initApp() {
 
   document.getElementById("add-surgery-form").addEventListener("submit", (e) => {
     e.preventDefault();
-    const sType = document.getElementById("new-type").value;
-    appState.surgeries.push({
-      surgery_id: document.getElementById("new-id").value.trim(),
-      start_time: Number(document.getElementById("new-start").value),
-      finish_time: Number(document.getElementById("new-finish").value),
-      surgery_type: sType,
-      sterilization_duration: sType === "CONTAMINATED" ? Number(document.getElementById("new-sterilization").value) : 0,
-    });
-    renderSurgeriesEditorTable();
-    e.target.reset();
-    document.getElementById("new-sterilization").value = "0";
-    document.getElementById("new-sterilization").disabled = true;
-    runActiveTabSimulation();
+    showError("");
+    try {
+      const surgeryId = document.getElementById("new-id").value.trim();
+      if (!surgeryId) {
+        throw new Error("Informe um identificador válido para a cirurgia.");
+      }
+      if (appState.surgeries.some((item) => item.surgery_id === surgeryId)) {
+        throw new Error(`Já existe uma cirurgia com o ID '${surgeryId}'.`);
+      }
+
+      const startTime = parseHhmmToMinutes(
+        document.getElementById("new-start").value,
+        "Início da cirurgia"
+      );
+      const finishTime = parseHhmmToMinutes(
+        document.getElementById("new-finish").value,
+        "Fim da cirurgia"
+      );
+      if (startTime >= finishTime) {
+        throw new Error(
+          `Horário inválido para '${surgeryId}': o início (${formatMinutes(startTime)}) deve ser estritamente menor que o término (${formatMinutes(finishTime)}).`
+        );
+      }
+
+      const sType = document.getElementById("new-type").value;
+      const sterilization =
+        sType === "CONTAMINATED"
+          ? Number(document.getElementById("new-sterilization").value)
+          : 0;
+      if (
+        sType === "CONTAMINATED" &&
+        (!Number.isInteger(sterilization) || sterilization <= 0)
+      ) {
+        throw new Error(
+          "Cirurgias contaminadas exigem duração inteira de esterilização maior que zero."
+        );
+      }
+
+      appState.surgeries.push({
+        surgery_id: surgeryId,
+        start_time: startTime,
+        finish_time: finishTime,
+        surgery_type: sType,
+        sterilization_duration: sterilization,
+      });
+      renderSurgeriesEditorTable();
+      e.target.reset();
+      document.getElementById("new-sterilization").value = "0";
+      document.getElementById("new-sterilization").disabled = true;
+      runActiveTabSimulation();
+    } catch (err) {
+      showError(err.message);
+    }
   });
 
   document.getElementById("generate-btn").addEventListener("click", async () => {

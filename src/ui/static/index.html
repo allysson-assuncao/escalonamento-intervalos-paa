@@ -41,10 +41,10 @@
         <div id="shift-fields" class="shift-fields">
           <div class="field-pair">
             <div>
-              <label class="field-label" for="horizon-input">Horizonte H (min)</label>
-              <input type="number" id="horizon-input" min="1" value="1080" />
+              <label class="field-label" for="horizon-input">Horizonte H (HH:MM)</label>
+              <input type="text" id="horizon-input" class="hhmm-input" inputmode="numeric" maxlength="5" placeholder="18:00" value="18:00" />
             </div>
-            <div class="hhmm-badge" id="horizon-hhmm">18:00</div>
+            <div class="hhmm-badge" id="horizon-hhmm">1080 min</div>
           </div>
           <label class="checkbox-row">
             <input type="checkbox" id="window-enabled-checkbox" />
@@ -52,12 +52,12 @@
           </label>
           <div id="window-fields" class="field-pair hidden">
             <div>
-              <label class="field-label" for="window-start-input">Início A (min)</label>
-              <input type="number" id="window-start-input" min="0" value="720" />
+              <label class="field-label" for="window-start-input">Início A (HH:MM)</label>
+              <input type="text" id="window-start-input" class="hhmm-input" inputmode="numeric" maxlength="5" placeholder="12:00" value="12:00" />
             </div>
             <div>
-              <label class="field-label" for="window-end-input">Fim B (min)</label>
-              <input type="number" id="window-end-input" min="1" value="780" />
+              <label class="field-label" for="window-end-input">Fim B (HH:MM)</label>
+              <input type="text" id="window-end-input" class="hhmm-input" inputmode="numeric" maxlength="5" placeholder="13:00" value="13:00" />
             </div>
           </div>
         </div>
@@ -72,8 +72,8 @@
         <form id="add-surgery-form" class="add-form">
           <div class="form-grid-3">
             <input type="text" id="new-id" placeholder="ID (ex: S4)" required maxlength="24" />
-            <input type="number" id="new-start" placeholder="Início (min)" min="0" required />
-            <input type="number" id="new-finish" placeholder="Fim (min)" min="1" required />
+            <input type="text" id="new-start" class="hhmm-input" inputmode="numeric" maxlength="5" placeholder="Início (HH:MM)" required />
+            <input type="text" id="new-finish" class="hhmm-input" inputmode="numeric" maxlength="5" placeholder="Fim (HH:MM)" required />
           </div>
           <div class="form-grid-3">
             <select id="new-type">
