@@ -1,7 +1,7 @@
 ---
 id: "testing-benchmark-and-visual-interface"
 title: "Testing, Empirical Benchmark, and Visual Interface Requirements"
-version: "1.1.0"
+version: "1.2.0"
 status: "active"
 owners:
   - "@allysson-assuncao"
@@ -106,26 +106,22 @@ The benchmark harness (`src/benchmark/runner.py`) exposes `BenchmarkPoint`, `gen
 
 ---
 
-## 4. Visual Interface & Presentation Guidelines (UI Framework `TBD`)
+## 4. Visual Interface & Presentation Architecture (Zero-Dependency Local Web + Native SVG)
 
-The visual interface—whose concrete UI toolkit will be finalized and implemented in a dedicated subsequent change—MUST support live classroom demonstration of both **correctness** and **asymptotic complexity**:
+The visual interface uses a **Zero-Dependency Local Web Application** (`http.server.ThreadingHTTPServer` bound to `127.0.0.1:8765` by default + Vanilla HTML5/CSS3/ES6 JS and interactive native SVG in `src/ui/static/`), supporting live classroom demonstration of **correctness**, **real-time data structures**, and **asymptotic complexity**:
 
-1. **Interactive Timeline / Gantt View**:
-   - Horizontal time axis showing the full day up to closing horizon $H$.
-   - Highlighted shaded band for the shift-change window $[A, B]$ and vertical boundary marker for closing horizon $H$.
-   - Distinct visual encoding per surgery:
-     - **Active Surgical Interval $[s_i, f_i]$**: Solid color bar (distinguishing `CLEAN` vs. `CONTAMINATED`).
-     - **Automated Sterilization Cooldown $[f_i, f_i + c_i]$**: Hatched or dashed trailing extension clearly demonstrating when sterilization runs inside $[A, B]$ or past $H$.
-     - **Effective Release Marker ($r_i$)**: Explicit tick showing when the room next opens.
-2. **Side-by-Side Comparative Mode**:
-   - Ability to load pre-configured scenarios (`SC-01` through `SC-04`, especially the 3-surgery counterexample `SC-02`) or custom inputs.
-   - Side-by-side display comparing:
-     - **Classic Greedy vs. Naive Reduction vs. Adapted Greedy vs. Adapted DP** (highlighting why Classic/Naive fail on `SC-02` while Adapted Greedy and Adapted DP both hit optimal count `2`).
-     - Selected surgeries, rejected/incompatible surgeries, and exact execution metrics.
-3. **Complexity & Benchmark Dashboard**:
-   - Display runtime table and/or curve comparing `Adapted Greedy`, `Adapted DP`, `Classic Greedy`, and `Classic DP` over growing $n$, visually confirming matching $\mathcal{O}(n \log n)$ slopes.
+1. **Interactive 3-Tab Presentation Layout + Live `HH:MM` Editor**:
+   - **Tab 1 — Step-by-Step Debugger**: Full multi-stage micro-step playback (`PREPROCESSING`, `SORTING`, `PREDECESSORS` with `bisect` `lo/mid/hi` or two-pointer `release_ptr`, `SELECTION_OR_DP` with `last_release` or `dp[i]` recurrence, `BACKTRACKING`, and `RESULT`), phase-jump shortcuts (`phase_offsets`), custom SVG Gantt (solid `[s_i, f_i]` active bars, hatched sterilization extensions `[f_i, f_i + c_i]`, `[A, B]` shaded band, `H` cutoff, `r_i` tick), Real-Time Variable Watch, and Array Inspector (`Ordered[]`, `p[]`, `DP[]`).
+   - **Tab 2 — Comparative Arena**: Side-by-side execution across all 5 schedulers (`ClassicGreedyScheduler`, `ClassicDPScheduler`, `NaiveReductionScheduler`, `AdaptedGreedyScheduler`, `AdaptedDPScheduler`) highlighting `SC-02` non-reducibility and flagging physical sterilization, shift-window, and horizon violations on classic schedules.
+   - **Tab 3 — Complexity & Benchmark Lab**: Interactive benchmark runner and native SVG curves plotting $T(n)$, $T(n)/(n \log_2 n)$, and $T(n)/n$ across growing $n$ (plus `is_presorted` toggle) alongside formatted tabular metrics.
+   - **Live Input Editor**: Preset selector (`SC-01`..`SC-05b`), automatic `HH:MM` masked time inputs (`attachHhmmInputMask`, `parseHhmmToMinutes`) enforcing `start_time < finish_time` and valid $[A, B]$ / $H$ bounds, add/delete surgery controls, and seeded synthetic generation.
+2. **Local Loopback HTTP JSON API & Defensive Resource Guards (`src/ui/server.py`)**:
+   - Endpoints: `GET /api/scenarios`, `POST /api/trace`, `POST /api/compare`, `POST /api/generate`, `POST /api/benchmark`.
+   - Security bounds: `MAX_REQUEST_BODY_BYTES = 262_144` (with bounded TCP drain on Windows before HTTP 413), `MAX_TRACE_INPUT_SIZE = 200`, `MAX_GENERATE_SIZE = 5000`, `MAX_BENCHMARK_SIZE = 10000`, `MAX_BENCHMARK_REPETITIONS = 20`, static directory-traversal protection confined to `src/ui/static/`, and XSS-safe DOM rendering (`textContent`).
+3. **Automated UI, Tracer & CLI Verification (`tests/test_ui_tracer_and_server.py`)**:
+   - Validates tracer parity across all 5 schedulers and `SC-01`..`SC-05`, DP micro-steps, comparative conflict detection, live HTTP endpoints, resource/security guards, `HH:MM` validation, and `src/main.py` headless CLI (`--scenario`, `--benchmark`).
 4. **Documentation (`README.md`)**:
-   - Complete setup instructions (`venv`, `pip install`, running `pytest`, launching benchmarks, and launching the visual interface).
+   - Complete setup instructions (`venv`, running `pytest`, launching benchmarks, launching the visual interface) and academic project documentation (delivered in dedicated subsequent documentation change).
 
 ---
 
@@ -143,8 +139,8 @@ The visual interface—whose concrete UI toolkit will be finalized and implement
 
 ## Out of Scope
 
-- Selection of a specific GUI/Web framework (deferred to the UI specification change).
-- Cloud hosting or multi-user authentication for the demonstration UI.
+- Cloud hosting or multi-user authentication for the local presentation UI.
+- External third-party Python or JavaScript UI frameworks.
 
 ## Revision History
 
@@ -152,3 +148,4 @@ The visual interface—whose concrete UI toolkit will be finalized and implement
 |---------|------|--------|---------|
 | 1.0.0 | 2026-11-15 | `@allysson-assuncao` | Initial specification of pre-configured scenarios, brute-force oracle, complexity benchmark, and presentation UI guidelines |
 | 1.1.0 | 2026-11-18 | `@allysson-assuncao` | Consolidated `implement-adapted-surgical-scheduling`: codified `SC-01`..`SC-05` fixture builders, `test_preprocessing.py` / `test_adapted_schedulers.py` / `test_oracle_and_comparison.py`, and `BenchmarkPoint` / `run_scaling_benchmark` contracts |
+| 1.2.0 | 2026-11-18 | `@allysson-assuncao` | Consolidated `implement-visual-simulation-interface`: finalized Section 4 with zero-dependency local web server + native SVG architecture, 3-tab UI + live `HH:MM` editor, loopback HTTP JSON API contracts, resource/security guards, and `tests/test_ui_tracer_and_server.py` |

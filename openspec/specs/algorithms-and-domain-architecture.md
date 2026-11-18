@@ -1,7 +1,7 @@
 ---
 id: "algorithms-and-domain-architecture"
 title: "Algorithms and Domain Architecture — Classic vs. Adapted Solvers"
-version: "1.2.0"
+version: "1.3.0"
 status: "active"
 owners:
   - "@allysson-assuncao"
@@ -154,6 +154,12 @@ Both adapted algorithms share pure preprocessing helpers in `src/domain/preproce
 - **`BruteForceOracleScheduler`**: implements `IntervalSchedulerProtocol` using exact branch-and-bound enumeration with `MAX_ORACLE_INPUT_SIZE = 20`, raising `InvalidSchedulingInputError` immediately when `len(surgeries) > 20`.
 - **`src/benchmark/runner.py`**: exposes `BenchmarkPoint`, `generate_synthetic_surgeries`, `run_scaling_benchmark`, and `format_benchmark_table` using strictly Python 3.12+ Standard Library modules (`collections.abc`, `dataclasses`, `math`, `random`, `statistics`).
 
+### 4.5. Visual Simulation & Presentation Layer (`src/ui/`, `src/main.py`)
+- **`src/ui/scenarios_catalog.py`**: canonical single source of truth for deterministic presets `SC-01`..`SC-05` (`ScenarioPreset`, `get_scenario_presets`, `get_scenario_by_id`) reused by `tests/fixtures/scenarios.py`.
+- **`src/ui/tracer.py`**: decoupled multi-stage execution tracer (`TracePhase`, `SurgeryVisualStatus`, `SimulationStep`, `SimulationTrace`, `trace_scheduler_execution`) and 5-algorithm side-by-side comparator (`AlgorithmComparisonEntry`, `run_comparative_arena`). Production `IntervalSchedulerProtocol.schedule()` implementations in `src/schedulers/` remain strictly uninstrumented (`[RNF-02]`), and `trace_scheduler_execution` cross-validates final parity against `schedule()`.
+- **`src/ui/server.py`**: loopback `ThreadingHTTPServer` (`127.0.0.1` default) serving zero-dependency Vanilla HTML5/CSS3/ES6 JS + SVG static assets (`src/ui/static/`) and validated JSON API routes.
+- **`src/main.py`**: unified CLI and browser launcher entrypoint supporting `--host`, `--port`, `--no-browser`, `--scenario`, and `--benchmark`.
+
 ---
 
 ## 5. Planned Repository Layout
@@ -185,15 +191,25 @@ escalonamento-intervalos-paa/
 │   ├── benchmark/
 │   │   ├── __init__.py
 │   │   └── runner.py              # Comparative runtime & optimality benchmark runner
-│   └── main.py                    # CLI / Visual interface entry point (TBD)
+│   ├── ui/
+│   │   ├── __init__.py
+│   │   ├── scenarios_catalog.py   # Canonical SC-01..SC-05 presets shared with tests
+│   │   ├── tracer.py              # Multi-stage step tracer & 5-algorithm comparator
+│   │   ├── server.py              # Loopback ThreadingHTTPServer & validated JSON API
+│   │   └── static/
+│   │       ├── index.html         # 3-tab presentation UI + live HH:MM input editor
+│   │       ├── styles.css         # High-contrast classroom-projector stylesheet
+│   │       └── app.js             # Step playback, SVG Gantt, arrays & benchmark charts
+│   └── main.py                    # CLI & local web server entrypoint
 ├── tests/
 │   ├── fixtures/
-│   │   └── scenarios.py           # Pre-configured deterministic hospital scenarios
+│   │   └── scenarios.py           # Re-exported deterministic hospital scenarios
 │   ├── test_domain_models.py
 │   ├── test_preprocessing.py
 │   ├── test_classic_schedulers.py
 │   ├── test_adapted_schedulers.py
-│   └── test_oracle_and_comparison.py
+│   ├── test_oracle_and_comparison.py
+│   └── test_ui_tracer_and_server.py
 ├── pyproject.toml / requirements.txt
 ├── README.md
 └── LICENSE
@@ -227,3 +243,4 @@ escalonamento-intervalos-paa/
 | 1.0.0 | 2026-11-15 | `@allysson-assuncao` | Initial specification of domain models, SOLID contracts, classic baselines, adapted algorithms, and package layout |
 | 1.1.0 | 2026-11-15 | `@allysson-assuncao` | Consolidated `implement-classic-baseline`: finalized Pure Classic Textbook Mode, $\mathcal{O}(n)$ pre-sorted validation, and `presorted_start_indices` two-pointer DP predecessor contract |
 | 1.2.0 | 2026-11-18 | `@allysson-assuncao` | Consolidated `implement-adapted-surgical-scheduling`: acyclic domain preprocessing, shared DP kernel, `NaiveReductionScheduler`, `AdaptedGreedyScheduler`, `AdaptedDPScheduler`, `BruteForceOracleScheduler` ($n \le 20$), and `src/benchmark/runner.py` |
+| 1.3.0 | 2026-11-18 | `@allysson-assuncao` | Consolidated `implement-visual-simulation-interface`: added zero-dependency `src/ui/` (`scenarios_catalog.py`, `tracer.py`, `server.py`, `static/`), `src/main.py`, and `tests/test_ui_tracer_and_server.py` while keeping `src/schedulers/` uninstrumented |
