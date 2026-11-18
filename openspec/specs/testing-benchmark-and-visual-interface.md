@@ -1,7 +1,7 @@
 ---
 id: "testing-benchmark-and-visual-interface"
 title: "Testing, Empirical Benchmark, and Visual Interface Requirements"
-version: "1.0.0"
+version: "1.1.0"
 status: "active"
 owners:
   - "@allysson-assuncao"
@@ -30,7 +30,14 @@ The PAA academic assignment explicitly requires pre-configured automated test ca
 
 ## 1. Pre-Configured Deterministic Test Scenarios
 
-All automated tests MUST run under `pytest` and include deterministic, human-readable pre-configured scenarios (represented cleanly in integer minutes from `00:00`, e.g., `13:00` = `780`, `18:00` = `1080`):
+All automated tests MUST run under `pytest` and include deterministic, human-readable pre-configured scenarios in `tests/fixtures/scenarios.py` (represented cleanly in integer minutes from `00:00`, e.g., `13:00` = `780`, `18:00` = `1080`), verified across `tests/test_preprocessing.py`, `tests/test_adapted_schedulers.py`, and `tests/test_oracle_and_comparison.py`:
+
+- **Fixture Builders (`tests/fixtures/scenarios.py`)**:
+  - `build_sc01_classic_homogeneous_surgeries()` (`SC-01`)
+  - `build_sc02_counterexample_surgeries()` with `ShiftConfig(closing_horizon=1080)` (`SC-02`)
+  - `build_sc03_end_of_shift_boundary()` (`SC-03`: `S_END` 17:20–17:50 + 30m vs `S_OVER` 17:30–18:01)
+  - `build_sc04_shift_window_scenarios()` (`SC-04a`, `SC-04b`, `SC-04c` under `[12:00, 13:00]`)
+  - `build_sc05_edge_case_scenarios()` (`SC-05`: all-infeasible set and $r_i$ tie-breaking set)
 
 ### Scenario 1 (`SC-01`): Classical Homogeneous Baseline
 - **Setup**: $n \ge 5$ `CLEAN` surgeries ($c_i = 0$) within $H = 18:00$ (`1080`), with `shift_window = None`.
@@ -75,10 +82,10 @@ All automated tests MUST run under `pytest` and include deterministic, human-rea
 To empirically verify correctness across thousands of randomized edge configurations without relying solely on manual cases:
 
 1. **Brute-Force Exact Oracle (`BruteForceOracleScheduler`)**:
-   - Enumerates feasible subsets (backtracking or bitmask over $n \le 20$) respecting active feasibility against $H$ and $[A, B]$ and compatibility $s_j \ge r_i$.
-   - **Hard Safety Guard**: Raises `ValueError` immediately if `len(surgeries) > 20` to prevent exponential $\mathcal{O}(2^n)$ hangs.
+   - Enumerates feasible subsets (branch-and-bound over $n \le 20$) respecting active feasibility against $H$ and $[A, B]$ and compatibility $s_j \ge r_i$.
+   - **Hard Safety Guard**: Raises `InvalidSchedulingInputError` (a `ValueError` subclass) immediately if `len(surgeries) > 20` to prevent exponential $\mathcal{O}(2^n)$ hangs.
 2. **Randomized Property Cross-Validation (`tests/test_oracle_and_comparison.py`)**:
-   - Generates deterministic-seed (`random.Random(seed)`) random hospital instances with $n \in [0, 18]$, mixed `CLEAN` and `CONTAMINATED` ratios, varied $c_i$, and varied $[A, B]$ / $H$.
+   - Generates deterministic-seed (`random.Random(seed)`) random hospital instances across 180 trials with $n \in [0, 16]$, mixed `CLEAN` and `CONTAMINATED` ratios, varied $c_i$, and varied $[A, B]$ / $H$.
    - Asserts across hundreds/thousands of instances:
      $$\text{len}(\text{AdaptedGreedy}) == \text{len}(\text{AdaptedDP}) == \text{len}(\text{BruteForceOracle})$$
    - Validates that every returned schedule strictly satisfies all physical non-overlap, sterilization, shift-window, and horizon constraints.
@@ -87,7 +94,7 @@ To empirically verify correctness across thousands of randomized edge configurat
 
 ## 3. Empirical Runtime & Complexity Benchmark Specification
 
-The benchmark harness (`src/benchmark/runner.py`) MUST evaluate all four production algorithms (`ClassicGreedyScheduler`, `ClassicDPScheduler`, `AdaptedGreedyScheduler`, `AdaptedDPScheduler`) across scaling input sizes (e.g., $n \in \{100, 500, 1000, 2500, 5000, 10000\}$):
+The benchmark harness (`src/benchmark/runner.py`) exposes `BenchmarkPoint`, `generate_synthetic_surgeries`, `run_scaling_benchmark`, and `format_benchmark_table` to evaluate all four production algorithms (`ClassicGreedyScheduler`, `ClassicDPScheduler`, `AdaptedGreedyScheduler`, `AdaptedDPScheduler`) across scaling input sizes (e.g., $n \in \{100, 500, 1000, 2500, 5000, 10000\}$):
 
 1. **Metrics Collected per Run**:
    - Input size $n$ and number of feasible intervals $n'$.
@@ -144,3 +151,4 @@ The visual interface—whose concrete UI toolkit will be finalized and implement
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-11-15 | `@allysson-assuncao` | Initial specification of pre-configured scenarios, brute-force oracle, complexity benchmark, and presentation UI guidelines |
+| 1.1.0 | 2026-11-18 | `@allysson-assuncao` | Consolidated `implement-adapted-surgical-scheduling`: codified `SC-01`..`SC-05` fixture builders, `test_preprocessing.py` / `test_adapted_schedulers.py` / `test_oracle_and_comparison.py`, and `BenchmarkPoint` / `run_scaling_benchmark` contracts |

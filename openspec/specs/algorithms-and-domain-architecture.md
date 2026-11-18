@@ -1,7 +1,7 @@
 ---
 id: "algorithms-and-domain-architecture"
 title: "Algorithms and Domain Architecture — Classic vs. Adapted Solvers"
-version: "1.1.0"
+version: "1.2.0"
 status: "active"
 owners:
   - "@allysson-assuncao"
@@ -66,13 +66,14 @@ All core data structures MUST be immutable (`@dataclass(frozen=True)`) and typed
   - `discarded_infeasible_count: int`
   - `elapsed_ns: int` (high-resolution execution timing via `time.perf_counter_ns()`)
 
-### 1.2. Defensive Input Validation
+### 1.2. Defensive Input Validation & Layering
 - Invalid structural inputs (e.g., $s_i \ge f_i$, negative timestamps, `CLEAN` surgery with $c_i > 0$, `CONTAMINATED` surgery with $c_i \le 0$, or `ShiftWindow` outside $[0, H]$) MUST raise a dedicated domain exception (`InvalidSchedulingInputError(ValueError)`).
 - Validation MUST happen explicitly at construction/entry boundaries without mutating caller-owned collections.
+- `validate_scheduler_inputs(surgeries, shift_config)` is hosted in `src/domain/preprocessing.py` and re-exported from `src/schedulers/protocol.py` so `src/domain/` maintains strict acyclic dependency boundaries and never imports from `src/schedulers/`.
 
 ---
 
-## 2. Unified Strategy Contract (Dependency Inversion)
+## 2. Unified Strategy Contract & Shared Kernel (Dependency Inversion)
 
 All schedulers MUST implement a shared Python `Protocol` so benchmarking harnesses, comparative tests, and the visual interface depend only on the abstraction:
 
@@ -89,6 +90,8 @@ class IntervalSchedulerProtocol(Protocol):
         is_presorted: bool = False,
     ) -> SchedulingResult: ...
 ```
+
+`src/schedulers/protocol.py` also provides `order_processed_surgeries` (sorting or validating by `(effective_release_time, request.finish_time, request.start_time)`), `select_greedy_processed_surgeries`, `validate_presorted_start_indices`, and the parameterized unweighted interval DP kernel (`solve_interval_dp`) shared by both `ClassicDPScheduler` and `AdaptedDPScheduler` to eliminate duplicated DP, two-pointer/binary-search predecessor, and backtracking logic.
 
 ---
 
@@ -117,44 +120,39 @@ Both classic algorithms serve as permanent comparative baselines reflecting stan
 
 ---
 
-## 4. Authorial Adapted Solvers
+## 4. Authorial Adapted Solvers, Naive Comparator, Oracle & Benchmark
 
-Both adapted algorithms share a pure preprocessing helper (`preprocess_feasible_surgeries`) running in $\mathcal{O}(n)$ time:
+Both adapted algorithms share pure preprocessing helpers in `src/domain/preprocessing.py` running in $\mathcal{O}(n)$ time:
 
-### 4.1. Preprocessing: Feasibility Filter & Effective Release Evaluator ($\mathcal{O}(n)$)
-For each `SurgeryRequest` $i$:
-1. Check active feasibility against `shift_config` (if provided):
-   - Reject if $f_i > H$.
-   - If `shift_window` $[A, B]$ exists, reject if active interval $[s_i, f_i)$ overlaps $[A, B)$ (i.e., reject unless $f_i \le A$ or $s_i \ge B$).
-2. Compute Effective Release Time $r_i$ in $\mathcal{O}(1)$:
-   - Let $e_i = f_i + c_i$.
-   - If `shift_window` $[A, B]$ exists and $f_i \le A$ and $A < e_i < B$, set $r_i = B$; otherwise set $r_i = e_i$.
-3. Wrap in `ProcessedSurgery(request=i, effective_release_time=r_i)`.
+### 4.1. Preprocessing: Feasibility Filter, Effective Release & Naive Reduction ($\mathcal{O}(n)$)
+- **`is_actively_feasible(surgery, shift_config)`**: returns `True` unconditionally when `shift_config is None`; otherwise enforces $f_i \le H$ and, when `shift_window = [A, B]` exists, enforces $f_i \le A$ or $s_i \ge B$.
+- **`compute_effective_release_time(surgery, shift_config)`**: computes $e_i = f_i + c_i$, returning $B$ if `shift_config` defines `[A, B]` with $f_i \le A$ and $A < e_i < B$, and $e_i$ otherwise.
+- **`preprocess_feasible_surgeries(surgeries, shift_config=None)`**: validates inputs and returns `(feasible_processed_surgeries, discarded_infeasible_count)` in $\mathcal{O}(n)$.
+- **`preprocess_naive_static_reduction(surgeries, shift_config=None)`** and **`NaiveReductionScheduler`** (`src/schedulers/naive_reduction.py`): apply the flawed static transformation $f'_i = f_i + c_i$ against active constraints $H$ and $[A, B]$ to demonstrate non-reducibility in `SC-02` and `SC-03`.
 
 ### 4.2. `AdaptedGreedyScheduler` ($\mathcal{O}(n \log n)$ / $\mathcal{O}(n)$ pre-sorted)
-1. Preprocess feasible surgeries and compute $r_i$ in $\mathcal{O}(n)$.
-2. Unless `is_presorted=True`, sort feasible items by `(effective_release_time, request.finish_time, request.start_time)` in $\mathcal{O}(n \log n)$.
+1. Preprocess feasible surgeries and compute $r_i$ in $\mathcal{O}(n)$. When `shift_config=None`, $H$ and $[A, B]$ filtering is skipped (`discarded_infeasible_count = 0`) while biological cooldown release times $r_i = f_i + c_i$ remain enforced.
+2. Unless `is_presorted=True`, sort feasible items by `(effective_release_time, request.finish_time, request.start_time)` in $\mathcal{O}(n \log n)$ (or validate non-decreasing order in $\mathcal{O}(n)$ when `is_presorted=True`).
 3. Initialize `last_release = -1` and `selected = []`.
-4. Linear scan in $\mathcal{O}(n)$:
+4. Linear scan in $\mathcal{O}(n)$ via `select_greedy_processed_surgeries`:
    - For each item, if `item.request.start_time >= last_release`:
      - Append `item` to `selected`.
      - Update `last_release = item.effective_release_time`.
 5. Return `SchedulingResult`.
 
 ### 4.3. `AdaptedDPScheduler` ($\mathcal{O}(n \log n)$ / $\mathcal{O}(n)$ pre-sorted)
-1. Preprocess feasible surgeries and compute $r_i$ in $\mathcal{O}(n)$.
-2. Unless `is_presorted=True`, sort $n'$ feasible items by `(effective_release_time, request.finish_time, request.start_time)` in $\mathcal{O}(n \log n)$.
-3. Build release-time array $R = [r_1, \dots, r_{n'}]$.
-4. Compute predecessor indices `p[0..n'-1]` (1-based DP offset `dp[0..n']`):
-   - **Standard mode (`is_presorted=False`)**: For each $i \in \{0, \dots, n'-1\}$, compute `count_compatible = bisect.bisect_right(R, s_i, lo=0, hi=i)` in $\mathcal{O}(\log n')$, giving $p(i+1) = \text{count\_compatible}$ in $\mathcal{O}(n \log n)$ total.
-   - **Pre-sorted mode (`is_presorted=True`)**: If start-sorted indices are available or sorted via auxiliary pass only when unsorted, compute all predecessors via monotonic two-pointer scan in $\mathcal{O}(n')$ without binary search (specifically, when inputs are already pre-sorted by $r_i$ and start order is provided or tracked, two pointers achieve strict $\mathcal{O}(n)$ total time; in standard `is_presorted=True` calls without pre-sorted start times, sorting by start time takes $\mathcal{O}(n \log n)$, so the API explicitly supports pre-sorted `(by_release, by_start)` or falls back safely while preserving exactness).
-5. Fill DP table in $\mathcal{O}(n')$:
-   - `dp = [0] * (n' + 1)`
-   - For $k = 1 \dots n'$: `dp[k] = max(dp[k - 1], 1 + dp[p[k]])`.
-6. Backtrack from $k = n'$ down to $1$ in $\mathcal{O}(n')$:
-   - If `1 + dp[p[k]] >= dp[k - 1]`, pick item $k - 1$ and jump to `k = p[k]`; else `k -= 1`.
-   - Reverse collected items to restore chronological order.
-7. Return `SchedulingResult`.
+1. Preprocess feasible surgeries and compute $r_i$ in $\mathcal{O}(n)$ (skipping $H$/$[A, B]$ filtering when `shift_config=None`, while enforcing $r_i = f_i + c_i$).
+2. Passing `presorted_start_indices` when `is_presorted=False` or when any input item was filtered out by `shift_config` (`discarded_infeasible_count > 0`) MUST raise `InvalidSchedulingInputError`.
+3. Unless `is_presorted=True`, sort $n'$ feasible items by `(effective_release_time, request.finish_time, request.start_time)` in $\mathcal{O}(n \log n)$.
+4. Delegate predecessor resolution, DP table evaluation, and backtracking to the shared kernel `solve_interval_dp`:
+   - **Standard / binary-search mode**: computes $p(i+1) = \text{bisect\_right}(R, s_i, 0, i)$ in $\mathcal{O}(n \log n)$.
+   - **Pre-sorted two-pointer mode**: when `is_presorted=True` with validated `presorted_start_indices` (or monotonic `start_time`), computes predecessors via two pointers in $\mathcal{O}(n)$.
+   - Fills `dp[0..n']` and reconstructs the optimal subset iteratively via backtracking.
+5. Return `SchedulingResult`.
+
+### 4.4. `BruteForceOracleScheduler` & Empirical Benchmark (`src/schedulers/brute_force_oracle.py`, `src/benchmark/runner.py`)
+- **`BruteForceOracleScheduler`**: implements `IntervalSchedulerProtocol` using exact branch-and-bound enumeration with `MAX_ORACLE_INPUT_SIZE = 20`, raising `InvalidSchedulingInputError` immediately when `len(surgeries) > 20`.
+- **`src/benchmark/runner.py`**: exposes `BenchmarkPoint`, `generate_synthetic_surgeries`, `run_scaling_benchmark`, and `format_benchmark_table` using strictly Python 3.12+ Standard Library modules (`collections.abc`, `dataclasses`, `math`, `random`, `statistics`).
 
 ---
 
@@ -177,9 +175,10 @@ escalonamento-intervalos-paa/
 │   │   └── preprocessing.py       # Feasibility validation & Effective Release Time (r_i)
 │   ├── schedulers/
 │   │   ├── __init__.py
-│   │   ├── protocol.py            # IntervalSchedulerProtocol
+│   │   ├── protocol.py            # IntervalSchedulerProtocol & shared DP/ordering kernel
 │   │   ├── classic_greedy.py      # ClassicGreedyScheduler (Baseline)
 │   │   ├── classic_dp.py          # ClassicDPScheduler (Baseline)
+│   │   ├── naive_reduction.py     # NaiveReductionScheduler (f'_i = f_i + c_i comparator)
 │   │   ├── adapted_greedy.py      # AdaptedGreedyScheduler (Authorial)
 │   │   ├── adapted_dp.py          # AdaptedDPScheduler (Authorial)
 │   │   └── brute_force_oracle.py  # Exact oracle (n <= 20) for test cross-validation
@@ -190,7 +189,8 @@ escalonamento-intervalos-paa/
 ├── tests/
 │   ├── fixtures/
 │   │   └── scenarios.py           # Pre-configured deterministic hospital scenarios
-│   ├── test_domain_and_preprocessing.py
+│   ├── test_domain_models.py
+│   ├── test_preprocessing.py
 │   ├── test_classic_schedulers.py
 │   ├── test_adapted_schedulers.py
 │   └── test_oracle_and_comparison.py
@@ -226,3 +226,4 @@ escalonamento-intervalos-paa/
 |---------|------|--------|---------|
 | 1.0.0 | 2026-11-15 | `@allysson-assuncao` | Initial specification of domain models, SOLID contracts, classic baselines, adapted algorithms, and package layout |
 | 1.1.0 | 2026-11-15 | `@allysson-assuncao` | Consolidated `implement-classic-baseline`: finalized Pure Classic Textbook Mode, $\mathcal{O}(n)$ pre-sorted validation, and `presorted_start_indices` two-pointer DP predecessor contract |
+| 1.2.0 | 2026-11-18 | `@allysson-assuncao` | Consolidated `implement-adapted-surgical-scheduling`: acyclic domain preprocessing, shared DP kernel, `NaiveReductionScheduler`, `AdaptedGreedyScheduler`, `AdaptedDPScheduler`, `BruteForceOracleScheduler` ($n \le 20$), and `src/benchmark/runner.py` |
