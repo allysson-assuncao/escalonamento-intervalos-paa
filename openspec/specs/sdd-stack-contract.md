@@ -11,7 +11,7 @@
 - **Project Name:** `escalonamento-intervalos-paa`
 - **Primary Language:** Python
 - **Runtime / Platform:** Python 3.12+
-- **Framework:** Python Standard Library (`dataclasses`, `bisect`, `typing`, `enum`, `time`) for core scheduling algorithms; UI framework `TBD` (to be decided in dedicated UI change proposal)
+- **Framework:** Python Standard Library (`dataclasses`, `bisect`, `typing`, `enum`, `time`, `math`, `random`, `statistics`) for core scheduling algorithms and benchmarking; Python Standard Library local web server (`http.server`, `json`, `urllib.parse`, `webbrowser`, `argparse`) + zero-dependency Vanilla HTML5/CSS3/ES6 JavaScript and native interactive SVG for the visual simulation interface (`src/ui/` and `src/main.py`).
 - **Package Manager:** `pip` + `venv` (`pyproject.toml` / `requirements.txt`)
 
 ---
@@ -43,9 +43,9 @@
 
 ## API Contract (if applicable)
 
-- **API Type:** Internal Python Domain & Strategy Contracts (CLI / Visual Interface `TBD`)
+- **API Type:** Internal Python Domain & Strategy Contracts + Local Loopback HTTP JSON API (`GET /api/scenarios`, `POST /api/trace`, `POST /api/compare`, `POST /api/generate`, `POST /api/benchmark`) served by `src/ui/server.py`
 - **Spec Location:** `openspec/specs/algorithms-and-domain-architecture.md`
-- **Base URL (dev):** N/A
+- **Base URL (dev):** `http://127.0.0.1:8765` (configurable via `--host` and `--port` in `src/main.py`)
 
 ---
 
