@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Escalonamento Cirúrgico — Simulador e Análise PAA</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-title">
+      <h1>Escalonamento de Intervalos em Sala Cirúrgica (PAA)</h1>
+      <p>Simulação passo a passo, análise de estruturas de dados e complexidade assintótica &Theta;(n log n) / &Theta;(n)</p>
+    </div>
+    <nav class="tab-nav" aria-label="Modos de visualização">
+      <button type="button" class="tab-btn active" data-tab="simulator">1. Simulador Passo a Passo</button>
+      <button type="button" class="tab-btn" data-tab="arena">2. Arena Comparativa</button>
+      <button type="button" class="tab-btn" data-tab="benchmark">3. Benchmark &amp; Complexidade</button>
+    </nav>
+  </header>
+
+  <main class="workspace-grid">
+    <!-- Painel lateral de entrada compartilhada -->
+    <aside class="input-panel" aria-label="Configuração de entrada">
+      <section class="card">
+        <h2>Cenário de Entrada</h2>
+        <label class="field-label" for="preset-select">Preset Pré-configurado</label>
+        <div class="row-gap">
+          <select id="preset-select"></select>
+          <button type="button" id="load-preset-btn" class="btn btn-secondary">Carregar</button>
+        </div>
+        <p id="preset-description" class="muted-note"></p>
+      </section>
+
+      <section class="card">
+        <h2>Restrições do Turno</h2>
+        <label class="checkbox-row">
+          <input type="checkbox" id="shift-enabled-checkbox" checked />
+          <span>Aplicar horizonte H e janela de plantão</span>
+        </label>
+        <div id="shift-fields" class="shift-fields">
+          <div class="field-pair">
+            <div>
+              <label class="field-label" for="horizon-input">Horizonte H (min)</label>
+              <input type="number" id="horizon-input" min="1" value="1080" />
+            </div>
+            <div class="hhmm-badge" id="horizon-hhmm">18:00</div>
+          </div>
+          <label class="checkbox-row">
+            <input type="checkbox" id="window-enabled-checkbox" />
+            <span>Janela de troca [A, B]</span>
+          </label>
+          <div id="window-fields" class="field-pair hidden">
+            <div>
+              <label class="field-label" for="window-start-input">Início A (min)</label>
+              <input type="number" id="window-start-input" min="0" value="720" />
+            </div>
+            <div>
+              <label class="field-label" for="window-end-input">Fim B (min)</label>
+              <input type="number" id="window-end-input" min="1" value="780" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header-row">
+          <h2>Cirurgias (<span id="surgery-count-badge">0</span>)</h2>
+          <button type="button" id="apply-input-btn" class="btn btn-primary">Executar</button>
+        </div>
+
+        <form id="add-surgery-form" class="add-form">
+          <div class="form-grid-3">
+            <input type="text" id="new-id" placeholder="ID (ex: S4)" required maxlength="24" />
+            <input type="number" id="new-start" placeholder="Início (min)" min="0" required />
+            <input type="number" id="new-finish" placeholder="Fim (min)" min="1" required />
+          </div>
+          <div class="form-grid-3">
+            <select id="new-type">
+              <option value="CLEAN">CLEAN</option>
+              <option value="CONTAMINATED">CONTAMINATED</option>
+            </select>
+            <input type="number" id="new-sterilization" placeholder="Esteril. (min)" min="0" value="0" disabled />
+            <button type="submit" class="btn btn-secondary">+ Adicionar</button>
+          </div>
+        </form>
+
+        <div class="table-scroll">
+          <table class="mini-table" id="surgeries-editor-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>[s, f]</th>
+                <th>Tipo / c</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="surgeries-editor-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Gerador Aleatório</h2>
+        <div class="form-grid-3">
+          <div>
+            <label class="field-label" for="gen-n">n</label>
+            <input type="number" id="gen-n" min="1" max="200" value="10" />
+          </div>
+          <div>
+            <label class="field-label" for="gen-seed">Seed</label>
+            <input type="number" id="gen-seed" value="42" />
+          </div>
+          <div>
+            <label class="field-label" for="gen-ratio">% Contam.</label>
+            <input type="number" id="gen-ratio" min="0" max="1" step="0.05" value="0.40" />
+          </div>
+        </div>
+        <button type="button" id="generate-btn" class="btn btn-secondary full-width">Gerar Instância</button>
+      </section>
+
+      <div id="global-error-banner" class="error-banner hidden" role="alert"></div>
+    </aside>
+
+    <!-- Conteúdo das 3 abas -->
+    <section class="content-area">
+      <!-- ABA 1: SIMULADOR PASSO A PASSO -->
+      <div class="tab-panel active" id="tab-simulator">
+        <div class="card controls-card">
+          <div class="sim-top-controls">
+            <div>
+              <label class="field-label" for="algo-select">Algoritmo Simulado</label>
+              <select id="algo-select">
+                <option value="adapted_greedy">Guloso Adaptado (Earliest Effective Release)</option>
+                <option value="adapted_dp">Programação Dinâmica Adaptada</option>
+                <option value="classic_greedy">Guloso Clássico (Baseline)</option>
+                <option value="classic_dp">Programação Dinâmica Clássica (Baseline)</option>
+                <option value="naive_reduction">Redução Estática Ingênua (f' = f + c)</option>
+              </select>
+            </div>
+            <label class="checkbox-row inline-check">
+              <input type="checkbox" id="presorted-checkbox" />
+              <span>Entrada pré-ordenada (modo O(n))</span>
+            </label>
+          </div>
+
+          <div class="playback-bar">
+            <div class="playback-buttons">
+              <button type="button" id="btn-first" class="btn btn-secondary" title="Primeiro passo">&#9198; Início</button>
+              <button type="button" id="btn-prev" class="btn btn-secondary" title="Passo anterior">&#9664; Anterior</button>
+              <button type="button" id="btn-play" class="btn btn-primary" title="Reproduzir / Pausar">&#9654; Auto-Play</button>
+              <button type="button" id="btn-next" class="btn btn-secondary" title="Próximo passo">Próximo &#9654;</button>
+              <button type="button" id="btn-last" class="btn btn-secondary" title="Último passo">Fim &#9197;</button>
+            </div>
+            <div class="playback-meta">
+              <label for="speed-select">Velocidade:</label>
+              <select id="speed-select">
+                <option value="1200">Lenta (1.2s)</option>
+                <option value="650" selected>Normal (0.65s)</option>
+                <option value="250">Rápida (0.25s)</option>
+              </select>
+              <span id="step-counter-badge" class="step-badge">Passo 0 / 0</span>
+            </div>
+          </div>
+
+          <input type="range" id="step-slider" min="0" max="0" value="0" class="step-slider" aria-label="Linha do tempo dos passos" />
+
+          <div class="phase-jumps" id="phase-jumps-bar" aria-label="Saltos por fase"></div>
+        </div>
+
+        <div class="card step-narration-card">
+          <div class="narration-header">
+            <span id="step-phase-badge" class="phase-pill">FASE</span>
+            <h3 id="step-title">Pronto para simular</h3>
+          </div>
+          <p id="step-explanation" class="step-explanation">Selecione um cenário e clique em Executar para inspecionar a execução passo a passo.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-header-row">
+            <h2>Linha do Tempo Cirúrgica (Gantt SVG)</h2>
+            <div class="legend-row">
+              <span class="legend-item"><i class="swatch swatch-clean"></i> Ativa Limpa</span>
+              <span class="legend-item"><i class="swatch swatch-contam"></i> Ativa Contaminada</span>
+              <span class="legend-item"><i class="swatch swatch-steril"></i> Esterilização [f, f+c]</span>
+              <span class="legend-item"><i class="swatch swatch-selected"></i> Selecionada</span>
+              <span class="legend-item"><i class="swatch swatch-window"></i> Janela [A, B]</span>
+            </div>
+          </div>
+          <div id="gantt-container" class="svg-wrapper"></div>
+        </div>
+
+        <div class="inspector-split">
+          <div class="card">
+            <h2>Variáveis em Tempo Real</h2>
+            <div id="variables-grid" class="variables-grid"></div>
+          </div>
+
+          <div class="card">
+            <h2>Estruturas de Dados (Ordered / p[i] / DP[i])</h2>
+            <div id="arrays-inspector" class="arrays-inspector"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ABA 2: ARENA COMPARATIVA -->
+      <div class="tab-panel" id="tab-arena">
+        <div class="card">
+          <div class="card-header-row">
+            <h2>Comparativo Lado a Lado (5 Abordagens)</h2>
+            <button type="button" id="run-compare-btn" class="btn btn-primary">Atualizar Comparação</button>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table" id="compare-summary-table">
+              <thead>
+                <tr>
+                  <th>Algoritmo</th>
+                  <th>Selecionadas</th>
+                  <th>Descartadas</th>
+                  <th>Agenda Escolhida</th>
+                  <th>Tempo (ns)</th>
+                  <th>Validação Física Real</th>
+                </tr>
+              </thead>
+              <tbody id="compare-summary-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="compare-gantt-list" class="compare-gantt-list"></div>
+      </div>
+
+      <!-- ABA 3: BENCHMARK E COMPLEXIDADE -->
+      <div class="tab-panel" id="tab-benchmark">
+        <div class="card">
+          <div class="card-header-row">
+            <h2>Experimento Empírico de Complexidade Assintótica</h2>
+            <button type="button" id="run-benchmark-btn" class="btn btn-primary">Executar Benchmark</button>
+          </div>
+          <div class="bench-controls">
+            <div>
+              <label class="field-label" for="bench-sizes">Tamanhos n (separados por vírgula, máx 10000)</label>
+              <input type="text" id="bench-sizes" value="100, 500, 1000, 2500, 5000" />
+            </div>
+            <div>
+              <label class="field-label" for="bench-reps">Repetições (1..20)</label>
+              <input type="number" id="bench-reps" min="1" max="20" value="3" />
+            </div>
+            <div>
+              <label class="field-label" for="bench-seed">Seed</label>
+              <input type="number" id="bench-seed" value="42" />
+            </div>
+            <div class="bench-checks">
+              <label class="checkbox-row">
+                <input type="checkbox" id="bench-presorted" />
+                <span>Modo pré-ordenado &Theta;(n)</span>
+              </label>
+              <label class="checkbox-row">
+                <input type="checkbox" id="bench-include-naive" />
+                <span>Incluir Redução Ingênua</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="charts-grid">
+          <div class="card">
+            <h3>Tempo Mediano T(n) em ms</h3>
+            <div id="chart-time-container" class="svg-wrapper"></div>
+          </div>
+          <div class="card">
+            <h3 id="chart-ratio-title">Razão Normalizada T(n) / (n log2 n)</h3>
+            <div id="chart-ratio-container" class="svg-wrapper"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Tabela Consolidada de Métricas</h3>
+          <pre id="benchmark-table-pre" class="mono-pre">Clique em "Executar Benchmark" para gerar as medições empíricas.</pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
