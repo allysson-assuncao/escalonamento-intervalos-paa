@@ -10,6 +10,13 @@ from src.domain.models import (
     SurgeryType,
     is_strict_int,
 )
+from src.domain.preprocessing import (
+    compute_effective_release_time,
+    is_actively_feasible,
+    preprocess_feasible_surgeries,
+    preprocess_naive_static_reduction,
+    validate_scheduler_inputs,
+)
 
 __all__ = [
     "InvalidSchedulingInputError",
@@ -19,5 +26,10 @@ __all__ = [
     "ShiftWindow",
     "SurgeryRequest",
     "SurgeryType",
+    "compute_effective_release_time",
+    "is_actively_feasible",
     "is_strict_int",
+    "preprocess_feasible_surgeries",
+    "preprocess_naive_static_reduction",
+    "validate_scheduler_inputs",
 ]
