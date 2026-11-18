@@ -370,6 +370,10 @@ class SimulationRequestHandler(BaseHTTPRequestHandler):
                 "Content-Length não pode ser negativo."
             )
         if content_length > MAX_REQUEST_BODY_BYTES:
+            # Drena excesso limitado no buffer TCP para evitar TCP RST no Windows ao responder 413
+            if content_length <= MAX_REQUEST_BODY_BYTES * 4:
+                self.rfile.read(content_length)
+            self.close_connection = True
             raise _PayloadTooLargeError(
                 f"Corpo da requisição excede o limite de {MAX_REQUEST_BODY_BYTES} bytes."
             )
