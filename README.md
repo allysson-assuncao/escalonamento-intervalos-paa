@@ -165,4 +165,4 @@ python -m src.main --benchmark --sizes 100 500 1000 2500 5000 10000 --repetition
 ## 6. Documentação Complementar
 
 - 📊 **[Relatório de Testes, Benchmark e Complexidade](docs/relatorio-testes-benchmark-complexidade.md)**: análise completa dos cenários `SC-01` a `SC-05b`, validação cruzada com o Oráculo Exato em 180 instâncias aleatórias, tabelas empíricas para $n \in [100, 10000]$ e gráficos Mermaid de complexidade.
-- 🎓 **[Guia de Revisão, Arquitetura e Preparação para Apresentação](docs/guia-revisao-arquitetura-e-apresentacao.md)**: explicação detalhada da arquitetura SOLID, dissecação linha a linha das funções com referências `#Lxx-Lyy`, funcionamento interno do tracer e da interface SVG, roteiro de apresentação ao vivo e FAQ de defesa para a banca.
+- 🎓 **[Guia de Revisão, Arquitetura e Preparação para Apresentação](docs/guia-revisao-arquitetura-e-apresentacao.md)**: explicação detalhada da arquitetura SOLID, dissecação linha a linha das funções com referências `#Lxx-Lyy`, funcionamento interno do tracer e da interface SVG, roteiro de apresentação e FAQ de defesa.
