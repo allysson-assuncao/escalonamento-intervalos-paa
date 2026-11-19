@@ -418,10 +418,7 @@ class SimulationRequestHandler(BaseHTTPRequestHandler):
             self._send_static_file(rel_path)
             return
         if clean_path == "/api/scenarios":
-            presets = [
-                serialize_scenario_preset_to_dict(preset)
-                for preset in get_scenario_presets()
-            ]
+            presets = [serialize_scenario_preset_to_dict(p) for p in get_scenario_presets()]
             self._send_json(HTTPStatus.OK, {"scenarios": presets})
             return
 
@@ -438,6 +435,9 @@ class SimulationRequestHandler(BaseHTTPRequestHandler):
         }
         handler = routes.get(clean_path)
         if handler is None:
+            raw_len = (self.headers.get("Content-Length") or "").strip()
+            if raw_len.isdigit():
+                self.rfile.read(min(int(raw_len), MAX_REQUEST_BODY_BYTES))
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Rota POST não encontrada."})
             return
 
