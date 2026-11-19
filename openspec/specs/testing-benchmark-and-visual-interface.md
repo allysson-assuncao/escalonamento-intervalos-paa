@@ -1,7 +1,7 @@
 ---
 id: "testing-benchmark-and-visual-interface"
 title: "Testing, Empirical Benchmark, and Visual Interface Requirements"
-version: "1.2.0"
+version: "1.3.0"
 status: "active"
 owners:
   - "@allysson-assuncao"
@@ -120,8 +120,11 @@ The visual interface uses a **Zero-Dependency Local Web Application** (`http.ser
    - Security bounds: `MAX_REQUEST_BODY_BYTES = 262_144` (with bounded TCP drain on Windows before HTTP 413), `MAX_TRACE_INPUT_SIZE = 200`, `MAX_GENERATE_SIZE = 5000`, `MAX_BENCHMARK_SIZE = 10000`, `MAX_BENCHMARK_REPETITIONS = 20`, static directory-traversal protection confined to `src/ui/static/`, and XSS-safe DOM rendering (`textContent`).
 3. **Automated UI, Tracer & CLI Verification (`tests/test_ui_tracer_and_server.py`)**:
    - Validates tracer parity across all 5 schedulers and `SC-01`..`SC-05`, DP micro-steps, comparative conflict detection, live HTTP endpoints, resource/security guards, `HH:MM` validation, and `src/main.py` headless CLI (`--scenario`, `--benchmark`).
-4. **Documentation (`README.md`)**:
-   - Complete setup instructions (`venv`, running `pytest`, launching benchmarks, launching the visual interface) and academic project documentation (delivered in dedicated subsequent documentation change).
+4. **Documentation & Presentation Support (`README.md`, `docs/`, `tests/test_documentation_integrity.py`)**:
+   - **`README.md`**: Root project overview (`pt-BR`) covering academic background, classical vs. authorial extensions ($t_i$, $c_i$, $H$, $[A, B]$), closed-form $r_i$ formula, `SC-02` counterexample, setup (`venv`), `pytest` commands, headless CLI usage (`--scenario`, `--benchmark`), and Web UI launch.
+   - **`docs/relatorio-testes-benchmark-complexidade.md`**: Observed empirical benchmark tables ($n \in \{100, 500, 1000, 2500, 5000, 10000\}$ across general $\mathcal{O}(n \log n)$ and pre-sorted $\mathcal{O}(n)$ modes), Mermaid `xychart-beta` plots, `SC-01`..`SC-05b` scenario analysis, and 180-instance oracle validation summary (`pt-BR`).
+   - **`docs/guia-revisao-arquitetura-e-apresentacao.md`**: 5-module study & presentation guide covering Architecture & SOLID, line-referenced (`#Lxx-Lyy`) code dissection, Tracer & SVG UI internals, live 3-tab demo walkthrough, and Defense FAQ (`pt-BR`).
+   - **`tests/test_documentation_integrity.py`**: Automated `pytest` check verifying required sections, repository-relative link resolution, `#Lxx-Lyy` line-number bounds, balanced code/Mermaid fences, and absence of host-specific absolute paths or secrets.
 
 ---
 
@@ -149,3 +152,4 @@ The visual interface uses a **Zero-Dependency Local Web Application** (`http.ser
 | 1.0.0 | 2026-11-15 | `@allysson-assuncao` | Initial specification of pre-configured scenarios, brute-force oracle, complexity benchmark, and presentation UI guidelines |
 | 1.1.0 | 2026-11-18 | `@allysson-assuncao` | Consolidated `implement-adapted-surgical-scheduling`: codified `SC-01`..`SC-05` fixture builders, `test_preprocessing.py` / `test_adapted_schedulers.py` / `test_oracle_and_comparison.py`, and `BenchmarkPoint` / `run_scaling_benchmark` contracts |
 | 1.2.0 | 2026-11-18 | `@allysson-assuncao` | Consolidated `implement-visual-simulation-interface`: finalized Section 4 with zero-dependency local web server + native SVG architecture, 3-tab UI + live `HH:MM` editor, loopback HTTP JSON API contracts, resource/security guards, and `tests/test_ui_tracer_and_server.py` |
+| 1.3.0 | 2026-11-19 | `@allysson-assuncao` | Consolidated `deliver-project-documentation-and-presentation-guide`: finalized root `README.md`, empirical complexity report, 5-module presentation guide, and automated documentation integrity tests |

@@ -1,7 +1,7 @@
 ---
 id: "algorithms-and-domain-architecture"
 title: "Algorithms and Domain Architecture — Classic vs. Adapted Solvers"
-version: "1.3.0"
+version: "1.4.0"
 status: "active"
 owners:
   - "@allysson-assuncao"
@@ -209,8 +209,12 @@ escalonamento-intervalos-paa/
 │   ├── test_classic_schedulers.py
 │   ├── test_adapted_schedulers.py
 │   ├── test_oracle_and_comparison.py
-│   └── test_ui_tracer_and_server.py
-├── pyproject.toml / requirements.txt
+│   ├── test_ui_tracer_and_server.py
+│   └── test_documentation_integrity.py
+├── docs/
+│   ├── relatorio-testes-benchmark-complexidade.md
+│   └── guia-revisao-arquitetura-e-apresentacao.md
+├── pyproject.toml
 ├── README.md
 └── LICENSE
 ```
@@ -244,3 +248,4 @@ escalonamento-intervalos-paa/
 | 1.1.0 | 2026-11-15 | `@allysson-assuncao` | Consolidated `implement-classic-baseline`: finalized Pure Classic Textbook Mode, $\mathcal{O}(n)$ pre-sorted validation, and `presorted_start_indices` two-pointer DP predecessor contract |
 | 1.2.0 | 2026-11-18 | `@allysson-assuncao` | Consolidated `implement-adapted-surgical-scheduling`: acyclic domain preprocessing, shared DP kernel, `NaiveReductionScheduler`, `AdaptedGreedyScheduler`, `AdaptedDPScheduler`, `BruteForceOracleScheduler` ($n \le 20$), and `src/benchmark/runner.py` |
 | 1.3.0 | 2026-11-18 | `@allysson-assuncao` | Consolidated `implement-visual-simulation-interface`: added zero-dependency `src/ui/` (`scenarios_catalog.py`, `tracer.py`, `server.py`, `static/`), `src/main.py`, and `tests/test_ui_tracer_and_server.py` while keeping `src/schedulers/` uninstrumented |
+| 1.4.0 | 2026-11-19 | `@allysson-assuncao` | Consolidated `deliver-project-documentation-and-presentation-guide`: added `docs/relatorio-testes-benchmark-complexidade.md`, `docs/guia-revisao-arquitetura-e-apresentacao.md`, root `README.md`, and `tests/test_documentation_integrity.py` |

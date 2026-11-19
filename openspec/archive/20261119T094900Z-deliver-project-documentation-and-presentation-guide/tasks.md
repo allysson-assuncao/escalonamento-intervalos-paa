@@ -2,7 +2,7 @@
 
 > **Change ID:** `deliver-project-documentation-and-presentation-guide`
 > **Linked Proposal:** [proposal.md](./proposal.md)
-> **Status:** in-progress
+> **Status:** completed
 >
 > All tasks must be `[x]` before this change can be archived via `sdd-spec-archive`.
 
@@ -45,8 +45,8 @@
 
 ## Documentation Tasks
 
-- [ ] Merge `specs/algorithms-and-domain-architecture-delta.md` into `openspec/specs/algorithms-and-domain-architecture.md` upon archive
-- [ ] Merge `specs/testing-benchmark-and-visual-interface-delta.md` into `openspec/specs/testing-benchmark-and-visual-interface.md` upon archive
+- [x] Merge `specs/algorithms-and-domain-architecture-delta.md` into `openspec/specs/algorithms-and-domain-architecture.md` upon archive
+- [x] Merge `specs/testing-benchmark-and-visual-interface-delta.md` into `openspec/specs/testing-benchmark-and-visual-interface.md` upon archive
 
 ## Review Gate
 
@@ -54,4 +54,4 @@
 - [x] All security validation tasks complete
 - [x] All tests passing (`C:\Python314\python.exe -m pytest -v -p no:cacheprovider`)
 - [x] Proposal acceptance criteria verified
-- [ ] Ready for `sdd-spec-archive`
+- [x] Ready for `sdd-spec-archive`
