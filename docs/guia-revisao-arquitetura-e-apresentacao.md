@@ -1,6 +1,6 @@
 # Guia de Revisão, Arquitetura e Preparação para Apresentação
 
-Este documento serve como **guia completo de estudo e defesa oral** para todos os integrantes do grupo, explicando a arquitetura SOLID, cada módulo e função com referências exatas de arquivo e linha (`#Lxx-Lyy`), o funcionamento interno do rastreador passo a passo e da interface web SVG, o roteiro prático de demonstração em aula e as respostas técnicas para perguntas da banca.
+Este documento é o **guia enxuto de estudo e defesa oral** para a dupla apresentar o projeto com segurança, explicando a arquitetura SOLID, os arquivos essenciais com referências exatas (`#Lxx-Lyy`), o funcionamento da interface web em 2 abas, o roteiro prático ao vivo e respostas diretas para perguntas da banca.
 
 ---
 
@@ -10,40 +10,34 @@ Este documento serve como **guia completo de estudo e defesa oral** para todos o
 - [Módulo 2 — Dissecação Código a Código (Arquivos, Funções e Linhas)](#módulo-2--dissecação-código-a-código-arquivos-funções-e-linhas)
 - [Módulo 3 — Mecanismo Interno do Tracer e da Interface Web SVG](#módulo-3--mecanismo-interno-do-tracer-e-da-interface-web-svg)
 - [Módulo 4 — Roteiro Prático de Apresentação e Demonstração Ao Vivo](#módulo-4--roteiro-prático-de-apresentação-e-demonstração-ao-vivo)
-- [Módulo 5 — FAQ de Defesa (Perguntas Difíceis da Banca)](#módulo-5--faq-de-defesa-perguntas-difíceis-da-banca)
+- [Módulo 5 — FAQ de Defesa (Perguntas da Banca)](#módulo-5--faq-de-defesa-perguntas-da-banca)
 
 ---
 
 ## Módulo 1 — Arquitetura em Camadas e Princípios SOLID
 
-O projeto adota uma **arquitetura acíclica em camadas** onde camadas superiores dependem exclusivamente de camadas inferiores, garantindo baixo acoplamento e testabilidade isolada sem servidor gráfico ou dependências externas:
+O projeto adota uma **arquitetura acíclica em camadas** onde camadas superiores dependem exclusivamente de camadas inferiores, sem dependências externas de terceiros:
 
 ```mermaid
 flowchart TD
     Main["src/main.py<br/>Entrypoint CLI & Servidor Web"] --> UI["src/ui/<br/>server.py, tracer.py, scenarios_catalog.py, static/"]
-    Main --> Bench["src/benchmark/runner.py<br/>Gerador Sintético & Medições T(n)"]
-    UI --> Bench
-    UI --> Sched["src/schedulers/<br/>Protocolo + 5 Escalonadores + Oráculo"]
-    Bench --> Sched
+    UI --> Sched["src/schedulers/<br/>Protocolo + 4 Escalonadores + Oráculo"]
     Sched --> Dom["src/domain/<br/>models.py, preprocessing.py, exceptions.py"]
     UI --> Dom
-    Bench --> Dom
 ```
 
 ### Aplicação Prática de SOLID e Clean Code
 1. **Single Responsibility Principle (SRP)**:
    - `src/domain/models.py` cuida somente dos objetos de valor imutáveis e invariantes estruturais.
-   - `src/domain/preprocessing.py` concentra apenas viabilidade ativa, cálculo de $r_i$ e redução ingênua.
-   - `src/schedulers/` isola cada algoritmo em sua própria classe pequena e concisa (`ClassicGreedyScheduler`, `ClassicDPScheduler`, `NaiveReductionScheduler`, `AdaptedGreedyScheduler`, `AdaptedDPScheduler`, `BruteForceOracleScheduler`).
-   - `src/ui/tracer.py` separa o rastreamento didático passo a passo do caminho quente de produção em `src/schedulers/`.
-2. **Open/Closed Principle (OCP)**:
-   - Novos algoritmos ou comparadores podem ser plugados no `runner.py` e na interface simplesmente implementando `IntervalSchedulerProtocol`.
-3. **Liskov Substitution Principle (LSP)**:
-   - Qualquer uma das classes escalonadoras pode ser passada polimorficamente para `run_scaling_benchmark` ou testada via contrato único `.schedule(surgeries, shift_config, is_presorted=...)`.
-4. **Interface Segregation & Dependency Inversion Principle (ISP / DIP)**:
-   - [`IntervalSchedulerProtocol`](../src/schedulers/protocol.py#L20-L37) define apenas `.name` e `.schedule(...)`. Tanto o módulo de benchmark quanto a camada de apresentação dependem da abstração, e `src/domain/` **nunca** importa `src/schedulers/` (a validação `validate_scheduler_inputs` fica em `src/domain/preprocessing.py` e é reexportada em `src/schedulers/protocol.py`).
-5. **Imutabilidade Defensiva**:
-   - Todas as entidades de domínio e snapshots de simulação usam `@dataclass(frozen=True)`, e coleções recebidas do chamador são copiadas defensivamente antes de qualquer ordenação.
+   - `src/domain/preprocessing.py` concentra apenas viabilidade ativa e cálculo da liberação efetiva $r_i$.
+   - `src/schedulers/` isola cada algoritmo em sua própria classe pequena e direta (`ClassicGreedyScheduler`, `ClassicDPScheduler`, `AdaptedGreedyScheduler`, `AdaptedDPScheduler`, `BruteForceOracleScheduler`).
+   - `src/ui/tracer.py` mantém o rastreamento didático separado dos escalonadores de produção.
+2. **Open/Closed e Liskov Substitution (OCP / LSP)**:
+   - Todos os escalonadores aderem ao mesmo contrato `.schedule(surgeries, shift_config)`, permitindo execução polimórfica no comparador e nos testes.
+3. **Dependency Inversion (DIP)**:
+   - [`IntervalSchedulerProtocol`](../src/schedulers/protocol.py#L19-L33) define apenas `.name` e `.schedule(...)`. A camada de domínio (`src/domain/`) **nunca** importa `src/schedulers/`.
+4. **Imutabilidade Defensiva**:
+   - Todas as entidades e snapshots usam `@dataclass(frozen=True)`, e coleções recebidas do chamador são copiadas defensivamente antes de ordenar.
 
 ---
 
@@ -52,155 +46,127 @@ flowchart TD
 ### 2.1. Camada de Domínio (`src/domain/`)
 
 #### [`src/domain/exceptions.py`](../src/domain/exceptions.py#L1-L5)
-- [`InvalidSchedulingInputError`](../src/domain/exceptions.py#L4-L5): subclasse de `ValueError` usada em toda a aplicação para sinalizar violações de invariantes de entrada (intervalo inválido, janela $[A, B]$ malformada, `is_presorted=True` fora de ordem ou oráculo acima de $n > 20$).
+- [`InvalidSchedulingInputError`](../src/domain/exceptions.py#L4-L5): subclasse de `ValueError` lançada quando alguma invariante de entrada é violada (intervalo invertido, janela $[A, B]$ inválida ou oráculo com $n > 20$).
 
 #### [`src/domain/models.py`](../src/domain/models.py#L1-L186)
-- [`is_strict_int`](../src/domain/models.py#L9-L11): rejeita `bool` (`isinstance(True, int)` é verdadeiro em Python!) para impedir que `True`/`False` sejam aceitos como minutos.
+- [`is_strict_int`](../src/domain/models.py#L9-L11): rejeita `bool` para impedir que `True`/`False` sejam tratados como minutos inteiros.
 - [`SurgeryType`](../src/domain/models.py#L14-L18): enumeração `CLEAN` e `CONTAMINATED`.
-- [`ShiftWindow`](../src/domain/models.py#L21-L41): representa a janela $[A, B)$ garantindo $0 \le A < B$ no `__post_init__`.
-- [`ShiftConfig`](../src/domain/models.py#L44-L69): encapsula o horizonte de fechamento $H > 0$ e `shift_window` opcional ($B \le H$).
-- [`SurgeryRequest`](../src/domain/models.py#L72-L122): valida `surgery_id` não vazio, $0 \le s_i < f_i$, `c_i == 0` para `CLEAN` e `c_i > 0` para `CONTAMINATED`.
-- [`ProcessedSurgery`](../src/domain/models.py#L125-L145): associa a solicitação ao instante `effective_release_time` ($r_i \ge f_i$).
-- [`SchedulingResult`](../src/domain/models.py#L148-L186): retorna algoritmo, tupla cronológica selecionada, `total_selected`, `discarded_infeasible_count` e `elapsed_ns`.
+- [`ShiftWindow`](../src/domain/models.py#L22-L41): representa a troca de plantão $[A, B)$ garantindo $0 \le A < B$.
+- [`ShiftConfig`](../src/domain/models.py#L45-L69): encapsula o horizonte $H > 0$ e `shift_window` opcional ($B \le H$).
+- [`SurgeryRequest`](../src/domain/models.py#L73-L122): valida `surgery_id` não vazio, $0 \le s_i < f_i$, $c_i = 0$ para `CLEAN` e $c_i > 0$ para `CONTAMINATED`.
+- [`ProcessedSurgery`](../src/domain/models.py#L126-L145): associa a cirurgia ao seu instante `effective_release_time` ($r_i \ge f_i$).
+- [`SchedulingResult`](../src/domain/models.py#L149-L186): retorna nome do algoritmo, subconjunto selecionado, `total_selected`, `discarded_infeasible_count` e `elapsed_ns`.
 
-#### [`src/domain/preprocessing.py`](../src/domain/preprocessing.py#L1-L168)
-- [`validate_scheduler_inputs`](../src/domain/preprocessing.py#L13-L38): valida sequência (rejeitando `None`, `str`, `bytes` e elementos inválidos) e devolve uma cópia `list` em $\mathcal{O}(n)$ sem mutar a entrada do chamador.
-- [`is_actively_feasible`](../src/domain/preprocessing.py#L41-L63): núcleo da regra médica ativa em $\mathcal{O}(1)$. Retorna `True` se `shift_config is None`; caso contrário exige `finish_time <= closing_horizon` e, se houver `[A, B]`, exige `finish_time <= A or start_time >= B`.
+#### [`src/domain/preprocessing.py`](../src/domain/preprocessing.py#L1-L120) *(coração da adaptação)*
+- [`validate_scheduler_inputs`](../src/domain/preprocessing.py#L13-L38): valida a sequência de entrada e devolve cópia defensiva em $\mathcal{O}(n)$.
+- [`is_actively_feasible`](../src/domain/preprocessing.py#L41-L63): regra de atuação médica em $\mathcal{O}(1)$: exige `finish_time <= closing_horizon` e, havendo janela $[A, B]$, exige `finish_time <= A or start_time >= B`.
 - [`compute_effective_release_time`](../src/domain/preprocessing.py#L66-L88): fórmula fechada em $\mathcal{O}(1)$: calcula `raw_end = finish_time + sterilization_duration` e retorna `window.end` ($B$) se `finish_time <= A < raw_end < B`; caso contrário retorna `raw_end`.
-- [`preprocess_validated_surgeries`](../src/domain/preprocessing.py#L91-L111) e [`preprocess_feasible_surgeries`](../src/domain/preprocessing.py#L114-L120): filtram as $n' \le n$ cirurgias viáveis em $\mathcal{O}(n)$ retornando `(feasible, discarded_count)`.
-- [`_is_naive_interval_feasible`](../src/domain/preprocessing.py#L123-L136), [`preprocess_naive_validated_surgeries`](../src/domain/preprocessing.py#L139-L159) e [`preprocess_naive_static_reduction`](../src/domain/preprocessing.py#L162-L168): aplicam o erro clássico de tratar $f'_i = f_i + c_i$ como intervalo ativo contra $H$ e $[A, B]$ para evidenciar o contrexemplo `SC-02` e `SC-03`.
+- [`preprocess_validated_surgeries`](../src/domain/preprocessing.py#L91-L111) e [`preprocess_feasible_surgeries`](../src/domain/preprocessing.py#L114-L120): filtram as cirurgias viáveis e calculam $r_i$ em $\mathcal{O}(n)$.
 
 ---
 
 ### 2.2. Camada de Protocolo e Escalonadores (`src/schedulers/`)
 
-#### [`src/schedulers/protocol.py`](../src/schedulers/protocol.py#L1-L236)
-Centraliza o contrato e elimina qualquer duplicação entre as variantes Clássica e Adaptada:
-- [`IntervalSchedulerProtocol`](../src/schedulers/protocol.py#L20-L37): contrato `@runtime_checkable`.
-- [`_order_sequence_by_key`](../src/schedulers/protocol.py#L40-L56), [`order_surgeries_by_key`](../src/schedulers/protocol.py#L59-L66) e [`order_processed_surgeries`](../src/schedulers/protocol.py#L69-L83): se `is_presorted=False`, ordenam via Timsort em $\mathcal{O}(n \log n)$ por `(effective_release_time, finish_time, start_time)`; se `is_presorted=True`, apenas verificam monotonicidade em uma passada $\mathcal{O}(n)$.
-- [`select_greedy_processed_surgeries`](../src/schedulers/protocol.py#L86-L96): varredura linear $\mathcal{O}(n)$ que escolhe todo item com `start_time >= last_release` e atualiza `last_release = effective_release_time`.
-- [`validate_presorted_start_indices`](../src/schedulers/protocol.py#L106-L135): garante em $\mathcal{O}(n)$ que a permutação opcional `presorted_start_indices` cobre `0..n'-1` em ordem não decrescente de `start_time`.
-- [`_are_starts_monotonic`](../src/schedulers/protocol.py#L138-L143), [`_compute_predecessors_two_pointers`](../src/schedulers/protocol.py#L146-L161), [`_compute_predecessors_binary_search`](../src/schedulers/protocol.py#L164-L175) e [`_resolve_predecessors`](../src/schedulers/protocol.py#L178-L189):
-  - **Modo Dois Ponteiros ($\mathcal{O}(n)$)**: usado quando `is_presorted=True` com `presorted_start_indices` válido ou inícios já monótonos; o ponteiro `release_ptr` avança monotonicamente no máximo $n'$ vezes no total.
-  - **Modo Busca Binária ($\mathcal{O}(n \log n)$)**: calcula `bisect.bisect_right(release_times, start_time, lo=0, hi=idx)` para cada item.
-- [`solve_interval_dp`](../src/schedulers/protocol.py#L192-L225): preenche `dp[1..n']` com `max(dp[i-1], 1 + dp[p[i]])` em $\mathcal{O}(n)$ e faz *backtracking* iterativo de `n'` até `0` em $\mathcal{O}(n)$, devolvendo os itens em ordem cronológica.
+#### [`src/schedulers/protocol.py`](../src/schedulers/protocol.py#L1-L130) *(núcleo dos algoritmos)*
+- [`IntervalSchedulerProtocol`](../src/schedulers/protocol.py#L19-L33): contrato `@runtime_checkable`.
+- [`order_surgeries_by_key`](../src/schedulers/protocol.py#L44-L49) e [`order_processed_surgeries`](../src/schedulers/protocol.py#L52-L63): ordenam em $\mathcal{O}(n \log n)$ via Timsort por `(effective_release_time, finish_time, start_time)`.
+- [`select_greedy_processed_surgeries`](../src/schedulers/protocol.py#L66-L76): varredura linear $\mathcal{O}(n)$ que seleciona itens com `start_time >= last_release` e atualiza `last_release`.
+- [`compute_predecessors_binary_search`](../src/schedulers/protocol.py#L79-L90): calcula $p[1..n']$ em $\mathcal{O}(n \log n)$ usando `bisect.bisect_right`.
+- [`solve_interval_dp`](../src/schedulers/protocol.py#L93-L119): preenche `dp[1..n']` com `max(dp[i-1], 1 + dp[p[i]])` em $\mathcal{O}(n)$ e reconstrói a agenda via *backtracking* iterativo em $\mathcal{O}(n)$.
 
-#### Os 5 Escalonadores + Oráculo Exato
-1. [`ClassicGreedyScheduler`](../src/schedulers/classic_greedy.py#L15-L61): ignora $c_i$ e `shift_config`, ordena por `(finish_time, start_time)` e seleciona com `start_time >= last_finish`.
-2. [`ClassicDPScheduler`](../src/schedulers/classic_dp.py#L21-L71): encapsula cada solicitação com `effective_release_time=finish_time` e delega a `order_processed_surgeries` + `solve_interval_dp`.
-3. [`NaiveReductionScheduler`](../src/schedulers/naive_reduction.py#L17-L49): usa `preprocess_naive_validated_surgeries` ($f'_i = f_i + c_i$) + varredura gulosa.
-4. [`AdaptedGreedyScheduler`](../src/schedulers/adapted_greedy.py#L17-L47): executa `preprocess_validated_surgeries` ($\mathcal{O}(n)$), `order_processed_surgeries` ($\mathcal{O}(n \log n)$ ou $\mathcal{O}(n)$) e `select_greedy_processed_surgeries` ($\mathcal{O}(n)$).
-5. [`AdaptedDPScheduler`](../src/schedulers/adapted_dp.py#L19-L69): executa `preprocess_validated_surgeries`, bloqueia `presorted_start_indices` caso `discarded_count > 0` (evitando desalinhamento de índices após filtragem) e delega a `solve_interval_dp`.
-6. [`BruteForceOracleScheduler`](../src/schedulers/brute_force_oracle.py#L22-L56) e [`_search_exact_optimum`](../src/schedulers/brute_force_oracle.py#L59-L86): trava imediatamente entradas com $n > 20$ (`MAX_ORACLE_INPUT_SIZE` em [`#L19`](../src/schedulers/brute_force_oracle.py#L19)) e aplica *branch-and-bound* com poda `len(current) + (n - idx) <= len(best)` para certificar o ótimo global em instâncias pequenas.
+#### Os 4 Escalonadores Principais + Oráculo Exato
+1. [`ClassicGreedyScheduler`](../src/schedulers/classic_greedy.py#L15-L58): ignora $c_i$ e `shift_config`, ordena por `(finish_time, start_time)` e escolhe com `start_time >= last_finish`.
+2. [`ClassicDPScheduler`](../src/schedulers/classic_dp.py#L19-L51): usa `effective_release_time=finish_time` e delega a `order_processed_surgeries` + `solve_interval_dp`.
+3. [`AdaptedGreedyScheduler`](../src/schedulers/adapted_greedy.py#L17-L45): executa `preprocess_validated_surgeries` ($\mathcal{O}(n)$), `order_processed_surgeries` ($\mathcal{O}(n \log n)$) e `select_greedy_processed_surgeries` ($\mathcal{O}(n)$).
+4. [`AdaptedDPScheduler`](../src/schedulers/adapted_dp.py#L17-L45): executa `preprocess_validated_surgeries` ($\mathcal{O}(n)$), `order_processed_surgeries` ($\mathcal{O}(n \log n)$) e `solve_interval_dp` ($\mathcal{O}(n \log n)$).
+5. [`BruteForceOracleScheduler`](../src/schedulers/brute_force_oracle.py#L22-L54) e [`_search_exact_optimum`](../src/schedulers/brute_force_oracle.py#L57-L84): limitado a $n \le 20$ (`MAX_ORACLE_INPUT_SIZE` em [`#L19`](../src/schedulers/brute_force_oracle.py#L19)), valida otimalidade global nos testes por *branch-and-bound*.
 
----
-
-### 2.3. Benchmark e Entrypoint (`src/benchmark/`, `src/main.py`)
-
-- [`BenchmarkPoint`](../src/benchmark/runner.py#L20-L33): registro imutável com `median_elapsed_ns`, `mean_elapsed_ns`, `median_elapsed_ms`, `ratio_n_log_n` e `ratio_n`.
-- [`generate_synthetic_surgeries`](../src/benchmark/runner.py#L36-L88): cria cargas hospitalares reproduzíveis via `random.Random(seed)`.
-- [`_prepare_scheduler_input`](../src/benchmark/runner.py#L91-L119) e [`run_scaling_benchmark`](../src/benchmark/runner.py#L177-L241): isolam geração e pré-ordenação externa da medição interna `result.elapsed_ns` e agregam a mediana sobre `repetitions`.
-- [`format_benchmark_table`](../src/benchmark/runner.py#L244-L264): formata tabela alinhada para terminal e UI.
-- [`build_arg_parser`](../src/main.py#L15-L75), [`_run_scenario_cli`](../src/main.py#L78-L105), [`_run_benchmark_cli`](../src/main.py#L108-L123) e [`main`](../src/main.py#L126-L164): disponibilizam tanto modos *headless* (`--scenario`, `--benchmark`) quanto a abertura do servidor HTTP local.
+#### Entrypoint ([`src/main.py`](../src/main.py#L1-L121))
+- [`build_arg_parser`](../src/main.py#L16-L54), [`_run_scenario_cli`](../src/main.py#L57-L83) e [`main`](../src/main.py#L86-L117): suportam o servidor web local (`python -m src.main`) e execução direta no terminal (`--scenario CASE-02 --algorithm adapted_dp`).
 
 ---
 
 ## Módulo 3 — Mecanismo Interno do Tracer e da Interface Web SVG
 
-Para cumprir `[RNF-02]` (zero interferência na medição `elapsed_ns`), os algoritmos de `src/schedulers/` permanecem intactos. Toda a inspeção didática acontece no módulo desacoplado [`src/ui/`](../src/ui/__init__.py#L1-L55):
+Os algoritmos oficiais em `src/schedulers/` não contêm código de log ou interface. Toda a visualização roda isoladamente em [`src/ui/`](../src/ui/__init__.py#L1-L53):
 
 ```mermaid
 sequenceDiagram
     actor Apresentador as Apresentador (Navegador)
     participant JS as app.js (SVG + DOM Seguro)
     participant HTTP as server.py (127.0.0.1:8765)
-    participant Tracer as tracer.py / runner.py
+    participant Tracer as tracer.py
     participant Prod as src/schedulers/
 
-    Apresentador->>JS: Seleciona SC-02 e clica "Executar"
+    Apresentador->>JS: Seleciona CASE-02 e clica "Executar"
     JS->>HTTP: POST /api/trace (surgeries, shift_config, algorithm_key)
     HTTP->>Tracer: trace_scheduler_execution(...)
-    Tracer->>Prod: scheduler.schedule(...) (obtém resultado e elapsed_ns oficiais)
-    Tracer->>Tracer: Emite SimulationStep[] (PREPROCESSING -> RESULT) + phase_offsets
-    Tracer->>Tracer: Valida paridade 100% entre traço e schedule()
-    HTTP-->>JS: 200 JSON (steps, phase_offsets, processed_surgeries)
-    JS->>JS: Navega entre passos instantaneamente (0 requisições extras)
+    Tracer->>Prod: scheduler.schedule(...) (resultado oficial)
+    Tracer->>Tracer: Emite SimulationStep[] + complexity_summary + phase_offsets
+    Tracer->>Tracer: Confirma paridade 100% entre traço e schedule()
+    HTTP-->>JS: 200 JSON (steps, complexity_summary, phase_offsets, processed_surgeries)
+    JS->>JS: Navega entre passos no navegador sem novas requisições
 ```
 
 ### Detalhamento dos Módulos de Interface
-1. **Catálogo Compartilhado ([`src/ui/scenarios_catalog.py`](../src/ui/scenarios_catalog.py#L12-L295))**:
-   - Fonte única de verdade para os presets `SC-01` a `SC-05b` (`ScenarioPreset`, `get_scenario_presets`, `get_scenario_by_id`), reexportada por [`tests/fixtures/scenarios.py`](../tests/fixtures/scenarios.py#L1-L23).
-2. **Tracer Multiestágio e Arena Comparativa ([`src/ui/tracer.py`](../src/ui/tracer.py#L31-L1031))**:
-   - [`TracePhase`](../src/ui/tracer.py#L42-L50) e [`SurgeryVisualStatus`](../src/ui/tracer.py#L53-L61): modelam as 6 fases e os 6 estados visuais de cada barra no Gantt.
-   - [`_trace_preprocessing_phase`](../src/ui/tracer.py#L221-L345), [`_trace_sorting_phase`](../src/ui/tracer.py#L348-L390), [`_trace_predecessors_phase`](../src/ui/tracer.py#L393-L531), [`_trace_greedy_selection_phase`](../src/ui/tracer.py#L534-L590) e [`_trace_dp_table_and_backtracking`](../src/ui/tracer.py#L593-L691): capturam a evolução de cada variável (`s_i`, `f_i`, `c_i`, `r_i`, `last_release`, `lo`, `mid`, `hi`, `release_ptr`, `p_i`, `include_count`, `exclude_count`, `dp_i`, `current`) em snapshots imutáveis [`SimulationStep`](../src/ui/tracer.py#L64-L82).
-   - [`trace_scheduler_execution`](../src/ui/tracer.py#L695-L815): limita o traço interativo a `MAX_TRACE_INPUT_SIZE = 200` e verifica por `AssertionError` que a saída reconstruída pelo tracer é idêntica à saída oficial de `schedule()`.
-   - [`_audit_physical_conflicts`](../src/ui/tracer.py#L818-L850) e [`run_comparative_arena`](../src/ui/tracer.py#L884-L915): executam os 5 algoritmos e detectam automaticamente violações reais de $H$, $[A, B]$ ou esterilização $c_i$ nas agendas clássicas.
-3. **Servidor HTTP Local e Segurança ([`src/ui/server.py`](../src/ui/server.py#L42-L468))**:
-   - Usa `ThreadingHTTPServer` vinculado a `127.0.0.1` por padrão ([`create_http_server`](../src/ui/server.py#L457-L468)).
-   - [`parse_shift_config_payload`](../src/ui/server.py#L65-L95) e [`parse_surgeries_payload`](../src/ui/server.py#L98-L138): reconstroem entidades de domínio validando tipos estritos e mapeiam `InvalidSchedulingInputError` para `HTTP 400`.
-   - [`SimulationRequestHandler._read_json_body`](../src/ui/server.py#L354-L402) impõe teto `MAX_REQUEST_BODY_BYTES = 262_144` (com drenagem limitada de TCP no Windows antes de `HTTP 413`) e [`_send_static_file`](../src/ui/server.py#L324-L352) bloqueia *path traversal* fora de `src/ui/static/`.
-   - Os manipuladores [`_handle_trace_request`](../src/ui/server.py#L150-L182), [`_handle_compare_request`](../src/ui/server.py#L185-L203), [`_handle_generate_request`](../src/ui/server.py#L206-L231) e [`_handle_benchmark_request`](../src/ui/server.py#L234-L303) aplicam limites contra travamentos ($n \le 200$ no tracer, $n \le 5000$ no gerador, $n \le 10000$ e `repetitions <= 20` no benchmark).
-4. **Frontend Zero-Deps em 3 Abas ([`src/ui/static/index.html`](../src/ui/static/index.html#L1-L287) e [`src/ui/static/app.js`](../src/ui/static/app.js#L1-L1033))**:
-   - **Máscara e Validação `HH:MM`**: [`attachHhmmInputMask`](../src/ui/static/app.js#L45-L57) e [`parseHhmmToMinutes`](../src/ui/static/app.js#L59-L71) inserem `:` automaticamente e impedem inclusão de cirurgias com `startTime >= finishTime`.
-   - **Gantt SVG Interativo**: [`buildGanttSvg`](../src/ui/static/app.js#L226-L445) renderiza barras ativas sólidas, extensões hachuradas (`#steril-hatch`) para $[f_i, f_i + c_i]$, banda sombreada $[A, B]$, linha $H$, marcador $r_i$ e linha móvel `last_release`.
-   - **Inspetores Sincronizados**: [`renderVariablesWatch`](../src/ui/static/app.js#L463-L478) e [`renderArraysInspector`](../src/ui/static/app.js#L480-L568) destacam em tempo real o índice ativo, o predecessor referenciado e a janela `[lo, mid, hi]` da busca binária; [`buildLineChartSvg`](../src/ui/static/app.js#L726-L816) plota as curvas empíricas na Aba 3. Todo texto do usuário é inserido exclusivamente via `.textContent` (prevenindo XSS).
+1. **Catálogo Didático ([`src/ui/scenarios_catalog.py`](../src/ui/scenarios_catalog.py#L13-L229))**:
+   - Define os 4 casos de demonstração `CASE-01` a `CASE-04` (`ScenarioPreset`, `get_scenario_presets`, `get_scenario_by_id`), compartilhados com [`tests/fixtures/scenarios.py`](../tests/fixtures/scenarios.py#L1-L19).
+2. **Tracer e Comparador ([`src/ui/tracer.py`](../src/ui/tracer.py#L28-L1015))**:
+   - [`TracePhase`](../src/ui/tracer.py#L38-L46) e [`SurgeryVisualStatus`](../src/ui/tracer.py#L49-L57): definem as 6 fases e os 6 estados visuais do Gantt.
+   - [`_trace_preprocessing_phase`](../src/ui/tracer.py#L188-L294), [`_trace_sorting_phase`](../src/ui/tracer.py#L297-L352), [`_trace_predecessors_phase`](../src/ui/tracer.py#L355-L449), [`_trace_greedy_selection_phase`](../src/ui/tracer.py#L452-L522) e [`_trace_dp_table_and_backtracking`](../src/ui/tracer.py#L525-L626): registram os snapshots [`SimulationStep`](../src/ui/tracer.py#L61-L79) com horários formatados em `HH:MM (min)` e marcador numérico `last_release_minutes`.
+   - [`_build_complexity_summary`](../src/ui/tracer.py#L629-L728): calcula o resumo matemático (fórmulas de ordenação/decisão e contagem real de operações por fase) exibido no topo da Aba 1.
+   - [`trace_scheduler_execution`](../src/ui/tracer.py#L731-L838): limita a simulação a $n \le 200$ e valida paridade 100% com `schedule()`.
+   - [`_audit_physical_conflicts`](../src/ui/tracer.py#L841-L873) e [`run_comparative_arena`](../src/ui/tracer.py#L876-L898): executam os 4 algoritmos lado a lado e sinalizam conflitos físicos reais nas soluções clássicas.
+3. **Servidor HTTP Local ([`src/ui/server.py`](../src/ui/server.py#L27-L317))**:
+   - Sobe `ThreadingHTTPServer` em `127.0.0.1:8765` ([`create_http_server`](../src/ui/server.py#L306-L317)), atendendo apenas `GET /api/scenarios`, `POST /api/trace` ([`_handle_trace_request`](../src/ui/server.py#L123-L140)) e `POST /api/compare` ([`_handle_compare_request`](../src/ui/server.py#L143-L154)) com validação via [`parse_shift_config_payload`](../src/ui/server.py#L47-L77) e [`parse_surgeries_payload`](../src/ui/server.py#L80-L120).
+4. **Frontend Enxuto em 2 Abas ([`src/ui/static/index.html`](../src/ui/static/index.html#L1-L246) e [`src/ui/static/app.js`](../src/ui/static/app.js#L1-L941))**:
+   - **Máscara `HH:MM`**: [`attachHhmmInputMask`](../src/ui/static/app.js#L37-L49) e [`parseHhmmToMinutes`](../src/ui/static/app.js#L51-L63) facilitam a criação de casos customizados ao vivo.
+   - **Resumo de Fórmulas e Complexidade**: [`renderComplexitySummary`](../src/ui/static/app.js#L456-L482) mostra as fórmulas matemáticas e operações executadas por fase.
+   - **Gantt SVG e Inspetores**: [`computeGanttDomain`](../src/ui/static/app.js#L218-L242) e [`buildGanttSvg`](../src/ui/static/app.js#L244-L454) desenham barras ativas, esterilização hachurada, $[A, B]$ e $H$; [`renderVariablesWatch`](../src/ui/static/app.js#L500-L515) e [`renderArraysInspector`](../src/ui/static/app.js#L517-L605) atualizam variáveis e vetores `Ordered[i]`, `r_i`, `p[i]` e `DP[i]`; [`runComparisonArena`](../src/ui/static/app.js#L699-L775) alinha os 4 mini-Gantts na mesma escala horizontal.
 
 ---
 
 ## Módulo 4 — Roteiro Prático de Apresentação e Demonstração Ao Vivo
 
-Sugestão de roteiro de **10 a 12 minutos** para a apresentação em sala:
+Roteiro sugerido de **8 a 10 minutos** para a dupla:
 
-### Ato 1 — Contexto e Modelo Matemático (2 min)
-1. Abrir a aplicação com `python -m src.main` (já inicia carregando **`SC-02`**).
-2. Explicar no Gantt inicial a diferença entre **barra sólida** (atuação médica $[s_i, f_i]$) e **extensão hachurada** (esterilização automatizada sem equipe $[f_i, f_i + c_i]$).
-3. Apresentar a fórmula de $r_i$ e por que $f'_i = f_i + c_i$ falha quando a esterilização ocorre após $H$ ou dentro de $[A, B]$.
+### Parte 1 — Problema Clássico vs. Restrições Hospitalares (`CASE-01` e `CASE-02`, 3 min)
+1. Iniciar a aplicação com `python -m src.main` (abre direto no **`CASE-02`**).
+2. Carregar rapidamente **`CASE-01`** para mostrar que, com cirurgias limpas ($c_i = 0$) e sem troca de plantão, o problema é idêntico ao *Interval Scheduling* clássico (todos os 4 algoritmos escolhem `{S1, S3, S4}`).
+3. Voltar ao **`CASE-02`** e apontar no Gantt:
+   - **Barra sólida**: atuação médica $[s_i, f_i]$ (precisa caber até $H = \text{18:00}$).
+   - **Barra hachurada**: esterilização passiva $[f_i, f_i + c_i)$ (pode passar de `18:00`, como em `S3`).
+   - Explicar o card **Resumo Matemático & Complexidade por Fase** no topo da tela.
 
-### Ato 2 — Simulação Passo a Passo na Aba 1 (4 min)
-1. Com **`SC-02`** e **Guloso Adaptado**, clicar em **Próximo** mostrando:
-   - Pré-processamento mantendo `S3` viável ($f_3 = \text{17:45} \le \text{18:00}$) com $r_3 = \text{18:45}$;
-   - Ordenação colocando `S2` ($r_2 = \text{15:00}$) antes de `S1` ($r_1 = \text{16:00}$);
-   - Varredura gulosa selecionando `S2`, rejeitando `S1` (`13:00 < 15:00`) e selecionando `S3` (`15:00 >= 15:00`).
-2. Trocar para **Programação Dinâmica Adaptada** no mesmo **`SC-02`** e usar os **botões de salto por fase**:
-   - Mostrar em **Estruturas de Dados** a busca binária definindo `p[1..3]` (`p = [0, 0, 1]`), o preenchimento `DP = [0, 1, 1, 2]` e o *backtracking* saltando de `i=3` (`S3`) para `p[3]=1` (`S2`).
-3. Carregar **`SC-04b`** e **`SC-04c`**: mostrar a banda vermelha `[12:00, 13:00]`, destacando o ajuste automático de $r_i = \text{13:00}$ quando absorvido pela pausa (`SC-04b`) versus o bloqueio até `13:15` quando transborda (`SC-04c`).
+### Parte 2 — Simulação Passo a Passo na Aba 1 (`CASE-02` e `CASE-04`, 4 min)
+1. Em **`CASE-02`** com **Guloso Adaptado**, avançar pelos passos mostrando:
+   - Pré-processamento calculando $r_1 = \text{16:00}$, $r_2 = \text{15:00}$ e aceitando `S3` ($f_3 = \text{17:45} \le \text{18:00}$) com $r_3 = \text{18:45}$;
+   - Ordenação colocando `S2` antes de `S1`;
+   - Varredura gulosa com a linha verde vertical (`Última Liberação`) selecionando `S2`, rejeitando `S1` e selecionando `S3`.
+2. Trocar para **`CASE-03`** para demonstrar a janela **`[12:00, 13:00]`**: mostrar `S2` e `S3` descartadas por invadirem o plantão e `S1` tendo $r_1$ ajustado para `13:00` (`B`).
+3. Trocar para **`CASE-04`** com **Programação Dinâmica Adaptada** e clicar nos saltos de fase:
+   - Mostrar a busca binária preenchendo `p[i]`, o cálculo de `DP[i] = max(DP[i-1], 1 + DP[p[i]])` e o *backtracking* escolhendo `{S2, S3, S6, S7}`.
 
-### Ato 3 — Arena Comparativa dos 5 Algoritmos na Aba 2 (2 min)
-1. Voltar para **`SC-02`** e abrir a aba **2. Arena Comparativa**.
-2. Mostrar na tabela e nos 5 mini-Gantts:
-   - `Classic Greedy` e `Classic DP` com selo **Conflito** (agendam `S1` e `S3` ignorando as 2h de ozônio de `S1`);
-   - `Naive Static Reduction` descartando `S3` e marcando apenas `1`;
-   - `Adapted Greedy` e `Adapted DP` ambos **Válidos** com `2` cirurgias (`S2, S3`).
-
-### Ato 4 — Complexidade Empírica na Aba 3 e Teste Ao Vivo (3 min)
-1. Abrir a aba **3. Benchmark & Complexidade** e clicar em **Executar Benchmark** (`100, 500, 1000, 2500, 5000`).
-2. Apontar o gráfico **$T(n)/(n \log_2 n)$** estabilizando em uma faixa constante (prova visual de $\Theta(n \log n)$ para ambas as estratégias adaptadas), e marcar **Modo pré-ordenado $\Theta(n)$** para mostrar $T(n)/n$ linear.
-3. No painel lateral esquerdo, demonstrar a entrada ao vivo em `HH:MM` adicionando uma cirurgia de teste (ou mostrando a rejeição de um intervalo inválido) para provar flexibilidade total frente a pedidos da banca.
+### Parte 3 — Comparativo dos 4 Algoritmos na Aba 2 + Caso Customizado (3 min)
+1. Abrir a aba **2. Comparativo dos 4 Algoritmos** em **`CASE-02`** ou **`CASE-04`**.
+2. Mostrar na tabela e nos **4 mini-Gantts alinhados na mesma escala de horário** os selos vermelhos de **Conflito** nas abordagens clássicas versus os selos verdes **Válido** nas abordagens adaptadas.
+3. No painel esquerdo, adicionar uma cirurgia customizada ao vivo (`HH:MM`) para responder a qualquer cenário proposto pelo professor.
 
 ---
 
-## Módulo 5 — FAQ de Defesa (Perguntas Difíceis da Banca)
+## Módulo 5 — FAQ de Defesa (Perguntas da Banca)
 
-**1. Por que vocês não simplesmente somaram $c_i$ ao horário de término $f_i$ antes de chamar o algoritmo clássico?**
-> Porque a redução estática $f'_i = f_i + c_i$ trata a esterilização como se fosse atuação médica ativa. Isso gera dois erros provados no `SC-02` e `SC-04b`: (a) descarta injustamente uma última cirurgia que termina às `17:45` ($f_i \le H$), mas cuja máquina esteriliza sozinha até `18:45` ($f'_i > H$); (b) descarta cirurgias antes da troca de plantão cuja esterilização ocorre em paralelo dentro de $[A, B]$. Nosso modelo separa **viabilidade ativa** (regras sobre $[s_i, f_i]$) de **liberação efetiva $r_i$**.
+**1. Por que vocês não simplesmente somaram $c_i$ em $f_i$ ($f'_i = f_i + c_i$) e aplicaram o algoritmo clássico?**
+> Porque somar $c_i$ diretamente trata a esterilização como se fosse atuação médica ativa. Isso falha em dois cenários reais demonstrados no sistema: no **`CASE-02`**, descartaria injustamente a última cirurgia `S3` (`15:00–17:45 + 60m`) só porque o ozônio termina às `18:45` após $H = \text{18:00}$; no **`CASE-03`**, descartaria uma cirurgia pré-pausa cuja esterilização termina durante a troca de plantão `[12:00, 13:00]`.
 
-**2. Por que a escolha gulosa pelo menor $r_i$ continua 100% ótima se a pausa $[A, B]$ cria um "salto" não linear em $r_i$?**
-> Porque o argumento clássico de troca (*"Greedy Stays Ahead"*) depende apenas de existir uma ordem total de disponibilidade da sala após cada escolha. Como toda cirurgia $j$ já foi previamente filtrada quanto a $[A, B]$ e $H$, e $r_i$ sintetiza o menor instante válido $\ge f_i$ fora de $[A, B)$ em que a sala está estéril, a viabilidade de encadear $j$ após $i$ reduz-se a uma única desigualdade escalar $s_j \ge r_i$. Logo, trocar a $k$-ésima cirurgia de qualquer solução ótima pela escolhida pelo Guloso Adaptado nunca piora $r_{g_k} \le r_{o_k}$.
+**2. Por que o Guloso Adaptado pelo menor $r_i$ continua 100% ótimo mesmo com o "salto" da janela $[A, B]$?**
+> Porque após descartar as cirurgias ativamente inviáveis contra $H$ e $[A, B)$, a restrição de encadear qualquer cirurgia viável $j$ após $i$ resume-se a $s_j \ge r_i$. Como $r_i$ define uma ordem total bem definida para a próxima disponibilidade da sala, o argumento clássico de troca (*"Greedy Stays Ahead"*) vale integralmente: trocar a $k$-ésima cirurgia de qualquer solução ótima pela escolhida pelo Guloso sempre mantém $r_{g_k} \le r_{o_k}$.
 
-**3. O que aconteceria com a complexidade se adicionássemos pesos/prioridades por cirurgia ou tempos de limpeza dependentes do par $(i, j)$?**
-> Se adicionássemos prioridades (pesos) arbitrárias, o problema passaria a ser o *Weighted Interval Scheduling*, onde o algoritmo guloso **perde a otimalidade** (sobrando apenas a PD em $\mathcal{O}(n \log n)$). Já se os tempos de setup dependessem de pares específicos $(i, j)$ (*Sequence-Dependent Setup Times*), o problema equivaleria a variantes de roteamento/escalonamento em máquina única (**NP-Difícil**), impossibilitando solução exata polinomial. A esterilização dependente apenas da cirurgia anterior $i$ somada à janela fixa $[A, B]$ preserva tanto a otimalidade gulosa quanto $\mathcal{O}(n \log n)$.
+**3. Por que os dois algoritmos adaptados têm exatamente a mesma complexidade assintótica $\mathcal{O}(n \log n)$?**
+> No **Guloso Adaptado**, o pré-processamento custa $\mathcal{O}(n)$, a ordenação por $r_i$ custa $\mathcal{O}(n \log n)$ e a varredura linear custa $\mathcal{O}(n)$, totalizando $\mathcal{O}(n \log n)$. Na **PD Adaptada**, o pré-processamento custa $\mathcal{O}(n)$, a ordenação por $r_i$ custa $\mathcal{O}(n \log n)$, o cálculo de $p(i)$ via busca binária (`bisect_right`) custa $\mathcal{O}(n \log n)$ e o preenchimento de `DP[i]` mais *backtracking* custam $\mathcal{O}(n)$, totalizando os mesmos $\mathcal{O}(n \log n)$ com espaço auxiliar $\mathcal{O}(n)$.
 
-**4. Como a PD Adaptada atinge $\mathcal{O}(n)$ no modo pré-ordenado se precisa calcular predecessores $p(i)$?**
-> No modo geral, $p(i)$ usa `bisect_right` em $\mathcal{O}(\log n)$ por item ($\mathcal{O}(n \log n)$ total). Porém, quando a entrada já vem pré-ordenada por $r_i$ e também dispomos da ordem de inícios $s_i$ (via `presorted_start_indices` ou inícios monótonos), `solve_interval_dp` utiliza varredura com **dois ponteiros** ([`protocol.py`](../src/schedulers/protocol.py#L146-L161)): o ponteiro `release_ptr` só avança da esquerda para a direita ao longo dos $n'$ itens, realizando no máximo $n'$ incrementos somados para todos os itens ($\mathcal{O}(n)$ amortizado).
+**4. O que mudaria se colocássemos pesos (prioridades) diferentes para cada cirurgia?**
+> Com pesos arbitrários (*Weighted Interval Scheduling*), a estratégia gulosa **perde a otimalidade**, enquanto a Programação Dinâmica continua ótima em $\mathcal{O}(n \log n)$ apenas trocando `1 + DP[p(i)]` por `w_i + DP[p(i)]`.
 
-**5. Por que `AdaptedDPScheduler` rejeita `presorted_start_indices` quando alguma cirurgia é descartada por $H$ ou $[A, B]$?**
-> Porque `presorted_start_indices` indexa a lista de tamanho original $n$, mas após filtrar cirurgias inviáveis restam $n' < n$ itens em `feasible`. Aceitar índices de tamanho $n$ causaria `IndexError` ou desalinhamento silencioso de predecessores; por segurança explícita ([`adapted_dp.py`](../src/schedulers/adapted_dp.py#L42-L52)), essa combinação dispara `InvalidSchedulingInputError`.
-
-**6. Como vocês garantem que a captura dos passos da interface não distorce os tempos de execução do benchmark?**
-> Seguindo `[RNF-02]`, `src/schedulers/*.py` não possui nenhum código de log ou *hook* de rastreamento. A interface chama o módulo isolado [`trace_scheduler_execution`](../src/ui/tracer.py#L695-L815) apenas quando o usuário simula passo a passo (limitado a $n \le 200$), enquanto os benchmarks chamam diretamente `.schedule()` medindo apenas `time.perf_counter_ns()`.
-
-**7. Como vocês validam que a implementação realmente acerta 100% dos casos além dos testes manuais?**
-> Além dos cenários determinísticos `SC-01`..`SC-05b`, o projeto implementa um **Oráculo Exato por Força Bruta com poda** ([`brute_force_oracle.py`](../src/schedulers/brute_force_oracle.py#L22-L86)) e executa validação cruzada em **180 instâncias aleatórias** (`seed` fixa) verificando que `Adapted Greedy == Adapted DP == Brute-Force Oracle` em 100% dos casos e que nenhuma agenda viola restrições físicas.
-
-**8. Por que construir a interface com servidor HTTP Stdlib + SVG nativo em vez de Streamlit ou Plotly?**
-> Para manter **zero dependências de terceiros** (`dependencies = []` em `pyproject.toml`), evitar reexecuções de página inteira a cada clique no modo passo a passo (que geram latência/cintilação em frameworks reativos top-down) e ter controle pixel a pixel em SVG para desenhar hachuras de esterilização dentro da janela $[A, B]$ e após $H$, sincronizadas com os vetores `p[i]` e `DP[i]`.
+**5. Como vocês comprovaram que o código não tem erro em casos aleatórios?**
+> Além dos 4 casos determinísticos e testes de borda, implementamos um **Oráculo Exato por Força Bruta** ([`brute_force_oracle.py`](../src/schedulers/brute_force_oracle.py#L22-L84)) para $n \le 20$ e rodamos validação cruzada automática em **180 instâncias aleatórias** (`tests/test_oracle_and_comparison.py`), confirmando que `Adapted Greedy == Adapted DP == Brute-Force Oracle` em 100% dos casos.

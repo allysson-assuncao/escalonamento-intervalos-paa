@@ -1,7 +1,7 @@
 ---
 id: "problem-definition-and-mathematical-model"
 title: "Problem Definition and Mathematical Model — Surgical Interval Scheduling"
-version: "1.0.0"
+version: "1.1.0"
 status: "active"
 owners:
   - "@allysson-assuncao"
@@ -23,7 +23,7 @@ resources:
 
 ## Context & Objectives
 
-This project fulfills an academic Design and Analysis of Algorithms (PAA — *Projeto e Análise de Algoritmos*) assignment requiring two exact, polynomial-time optimization algorithms—one **Greedy** and one **Dynamic Programming (DP)**—that solve a non-NP-Hard problem within the **same asymptotic time complexity class**. To introduce an original, non-trivial contribution, the project extends the classical **Interval Scheduling Problem** in an applied **Hospital Operating Room (OR)** context with **asymmetric biological sterilization cooldowns** and **medical shift constraints** (a closing horizon $H$ and an optional shift-change window $[A, B]$), adapting both consolidated textbook algorithms while preserving 100% exact optimality and identical $\mathcal{O}(n \log n)$ general-case ($\mathcal{O}(n)$ pre-sorted) complexity.
+This project fulfills an academic Design and Analysis of Algorithms (PAA — *Projeto e Análise de Algoritmos*) assignment requiring two exact, polynomial-time optimization algorithms—one **Greedy** and one **Dynamic Programming (DP)**—that solve a non-NP-Hard problem within the **same asymptotic time complexity class**. To introduce an original, non-trivial contribution, the project extends the classical **Interval Scheduling Problem** in an applied **Hospital Operating Room (OR)** context with **asymmetric biological sterilization cooldowns** and **medical shift constraints** (a closing horizon $H$ and an optional shift-change window $[A, B]$), adapting both consolidated textbook algorithms while preserving 100% exact optimality and identical $\mathcal{O}(n \log n)$ time complexity.
 
 ---
 
@@ -33,9 +33,9 @@ The project MUST satisfy all original assignment requirements:
 
 1. **Polynomial Problem Class**: Select a non-NP-Hard optimization problem admitting exact optimal solutions via both **Dynamic Programming** and a **Greedy Strategy** with identical asymptotic time complexity ($\mathcal{O}(n \log n)$).
 2. **Authorial Constraint & Adaptation**: Introduce a domain-grounded additional constraint and authorially adapt both consolidated textbook solutions so they continue to obtain the exact global optimum while preserving the same asymptotic complexity class.
-3. **Comparative Baseline Retention**: Implement and preserve the classical (unmodified) Greedy and DP solutions alongside the adapted solutions throughout the project lifecycle to compare code complexity, empirical runtime, and decision differences.
+3. **Comparative Baseline Retention**: Implement and preserve the classical (unmodified) Greedy and DP solutions alongside the adapted solutions throughout the project lifecycle to compare algorithm structure, decision behavior, and physical validity.
 4. **Pre-Configured Tests & Verification**: Provide automated tests with pre-configured scenarios demonstrating correctness, edge cases, and classic-vs-adapted divergence.
-5. **Documentation, Execution Instructions & Visual Interface**: Deliver clear project documentation, reproducible execution instructions, and an intuitive visual interface capable of illustrating algorithm execution and asymptotic complexity during class presentation.
+5. **Documentation, Execution Instructions & Visual Interface**: Deliver clear project documentation, reproducible execution instructions, and an intuitive visual interface capable of illustrating algorithm execution, data structures, variables, and asymptotic complexity during class presentation.
 
 ---
 
@@ -56,12 +56,12 @@ The project MUST satisfy all original assignment requirements:
 - **Classical Greedy (*Earliest Finish Time*)**:
   1. Sort all surgeries by non-decreasing finish time $f_i$ in $\mathcal{O}(n \log n)$.
   2. Scan linearly in $\mathcal{O}(n)$, greedily selecting each surgery $i$ whose start time satisfies $s_i \ge f_{\text{last}}$.
-  - **Total Complexity**: $\mathcal{O}(n \log n)$ general case ($\mathcal{O}(n)$ if already sorted by $f_i$).
+  - **Total Complexity**: $\mathcal{O}(n \log n)$.
 - **Classical Dynamic Programming (Unweighted Interval Scheduling)**:
   1. Sort all surgeries by non-decreasing finish time $f_i$ in $\mathcal{O}(n \log n)$.
-  2. Compute the latest compatible predecessor $p(i) = \max\{j < i \mid f_j \le s_i\}$ (or $0$ if none exists) via binary search in $\mathcal{O}(n \log n)$ (or $\mathcal{O}(n)$ via two pointers if start times are also pre-sorted).
+  2. Compute the latest compatible predecessor $p(i) = \max\{j < i \mid f_j \le s_i\}$ (or $0$ if none exists) via binary search in $\mathcal{O}(n \log n)$.
   3. Evaluate the recurrence $DP[0] = 0$ and $DP[i] = \max(DP[i - 1], 1 + DP[p(i)])$ for $i = 1, \dots, n$, and backtrack to reconstruct $S^*$ in $\mathcal{O}(n)$.
-  - **Total Complexity**: $\mathcal{O}(n \log n)$ general case ($\mathcal{O}(n)$ if pre-sorted).
+  - **Total Complexity**: $\mathcal{O}(n \log n)$.
 
 ---
 
@@ -75,11 +75,11 @@ Our adaptation avoids both pitfalls through **asymmetric biological sterilizatio
 
 ### 3.2. Extended Inputs
 For each surgery request $i \in \{1, \dots, n\}$:
-- **$s_i \ge 0$**: Active surgical start time (e.g., integer minutes from midnight or normalized day start).
+- **$s_i \ge 0$**: Active surgical start time (integer minutes from midnight).
 - **$f_i > s_i$**: Active surgical finish time.
 - **$t_i \in \{\text{CLEAN}, \text{CONTAMINATED}\}$**: Biological contamination risk class:
-  - **$\text{CLEAN}$ ($L$)**: Standard clean procedure; requires no heavy decontamination ($c_i = 0$). The next surgery may begin immediately at $f_i$ (subject to shift rules).
-  - **$\text{CONTAMINATED}$ ($C$)**: Infected/contaminated procedure; requires automated ozone/UV room sterilization of strictly positive duration $c_i > 0$ after $f_i$ before any subsequent surgery may begin.
+  - **$\text{CLEAN}$**: Standard clean procedure; requires no heavy decontamination ($c_i = 0$).
+  - **$\text{CONTAMINATED}$**: Infected/contaminated procedure; requires automated ozone/UV room sterilization of strictly positive duration $c_i > 0$ after $f_i$ before any subsequent surgery may begin.
 - **$c_i \ge 0$**: Automated sterilization cooldown duration ($c_i = 0$ when $t_i = \text{CLEAN}$; $c_i > 0$ when $t_i = \text{CONTAMINATED}$).
 
 Global Operating Room shift parameters:
@@ -97,7 +97,7 @@ Global Operating Room shift parameters:
 
 2. **Automated Sterilization Rule (Passive Transition Overlap)**:
    - Automated ozone/UV sterilization spans $[f_i, f_i + c_i)$ and operates **without medical personnel**.
-   - Consequently, sterilization **MAY extend past the closing horizon $H$** (for example, a contaminated surgery running `17:20–17:50` with $30$ minutes of sterilization until `18:20` when $H = 18:00$ is completely valid as long as no subsequent surgery is scheduled after it) and **MAY execute concurrently during the shift-change window $[A, B]$**.
+   - Consequently, sterilization **MAY extend past the closing horizon $H$** (for example, a contaminated surgery running `15:00–17:45` with $60$ minutes of sterilization until `18:45` when $H = 18:00$ is completely valid as long as no subsequent surgery is scheduled after it) and **MAY execute concurrently during the shift-change window $[A, B]$**.
    - However, any **subsequent surgery $j$** on the same day can only start once the room is **simultaneously sterilized and outside the shift-change window $[A, B)$**.
 
 ### 3.4. Closed-Form Effective Release Time ($r_i$)
@@ -110,18 +110,14 @@ The **Effective Release Time ($r_i$)**—the earliest timestamp at or after $f_i
 - If a shift-change window $[A, B]$ is configured:
   $$r_i = \begin{cases} B, & \text{if } f_i \le A \text{ and } A < e_i < B \\ e_i, & \text{otherwise} \end{cases}$$
 
-**Boundary Interpretation**:
-- If $f_i \le A$ and sterilization completes strictly inside the shift-change window ($A < e_i < B$), sterilization runs in parallel with the shift change, and the room becomes usable for the next medical team at $r_i = B$.
-- If $f_i \le A$ and sterilization overflows past $B$ ($e_i \ge B$), the room remains blocked by sterilization until $r_i = e_i$.
-- If $f_i \le A$ and $e_i \le A$, the room is released at $r_i = e_i$ (allowing another pre-break surgery before $A$, or post-break surgery starting at $\ge B$).
-- Note that for any valid next surgery $j$, its own feasibility already guarantees $s_j \notin [A, B)$ unless $s_j \ge B$ (since $s_j < f_j$ prohibits $s_j = A$ with $f_j \le A$). Therefore, compatibility between a feasible surgery $i$ and a subsequent feasible surgery $j$ reduces cleanly to the single scalar inequality:
-  $$s_j \ge r_i$$
+Compatibility between a feasible surgery $i$ and a subsequent feasible surgery $j$ reduces cleanly to the single scalar inequality:
+$$s_j \ge r_i$$
 
 ---
 
-## 4. Non-Reducibility Proof & Canonical 3-Surgery Counterexample
+## 4. Non-Reducibility Proof & Canonical 3-Surgery Counterexample (`CASE-02`)
 
-To prove mathematically that the adapted problem is **not** trivially reducible to the classical problem via static input transformation $f'_i = f_i + c_i$, consider an Operating Room with closing horizon $H = 18:00$ (no mid-shift break) and three afternoon surgery requests:
+To prove mathematically that the adapted problem is **not** trivially reducible to the classical problem via static input transformation $f'_i = f_i + c_i$, consider an Operating Room with closing horizon $H = 18:00$ (no mid-shift break) and three afternoon surgery requests (`CASE-02`):
 
 | Surgery | Type ($t_i$) | Active Interval $[s_i, f_i]$ | Sterilization ($c_i$) | Active Valid ($f_i \le 18:00$)? | Raw End ($e_i = f_i + c_i$) | Effective Release ($r_i$) |
 |---------|--------------|------------------------------|-----------------------|----------------------------------|------------------------------|-------------------------|
@@ -130,13 +126,10 @@ To prove mathematically that the adapted problem is **not** trivially reducible 
 | **S3** | `CONTAMINATED` | `15:00` – `17:45` | `1h` (`60` min) | Yes (`17:45 <= 18:00`) | `18:45` | `18:45` |
 
 ### Behavior Comparison Across Strategies
-1. **Classical Greedy (sorts solely by active finish $f_i$)**:
-   - Picks **S1** first because $f_1 = 14:00 < f_2 = 15:00$.
-   - Under real room constraints, S1 locks the room until `16:00`, disqualifying **S3** ($s_3 = 15:00 < 16:00$). (Or if the classical algorithm ignores sterilization completely, it produces an unsafe schedule `{S1, S3}` violating room decontamination.)
-   - Valid feasible schedule yielded: **`{S1}` (count = 1 — Suboptimal)**.
-2. **Naive Static Reduction (sets $f'_i = f_i + c_i$ and applies horizon filter $f'_i \le H$)**:
-   - Computes $f'_3 = 17:45 + 1\text{h} = 18:45 > 18:00$ and **falsely discards S3 as infeasible**, even though medical staff finish operating at `17:45` and the ozone unit sterilizes passively after `18:00`.
-   - Maximum schedule found without S3: **`{S2}` or `{S1}` (count = 1 — Suboptimal)**.
+1. **Classical Greedy & Classical DP (sort solely by active finish $f_i$)**:
+   - Select **S1** (`14:00 < 15:00`) and **S3** (`15:00 >= 14:00`), ignoring `S1`'s 2h sterilization until `16:00`, resulting in an **invalid physical conflict** (or yielding only `{S1}` = 1 when sterilization is enforced).
+2. **Hypothetical Naive Static Reduction ($f'_i = f_i + c_i \le H$)**:
+   - Computes $f'_3 = 17:45 + 1\text{h} = 18:45 > 18:00$ and **falsely discards S3 as infeasible**, yielding at most `1` surgery.
 3. **Adapted Authorial Greedy & Adapted Authorial DP**:
    - Separate **active validity** ($f_i \le H$, keeping S3) from **effective room release** ($r_i$).
    - Recognize $r_2 = 15:00 < r_1 = 16:00$, selecting **`{S2, S3}` (count = 2 — Exact Global Optimum)**.
@@ -148,9 +141,9 @@ To prove mathematically that the adapted problem is **not** trivially reducible 
 ### 5.1. Adapted Greedy Optimality Proof (*Exchange Argument*)
 Let $F$ be the set of active-feasible surgeries sorted in non-decreasing order of Effective Release Time $r_i$ (tie-breaking by non-decreasing $f_i$). Let $G = \{g_1, g_2, \dots, g_k\}$ be the schedule produced by Adapted Greedy (`Earliest Effective Release Time`), and let $O = \{o_1, o_2, \dots, o_m\}$ be any optimal feasible schedule sorted in chronological order.
 
-- **Base Claim ($k \ge 1$)**: Since $g_1$ minimizes $r_i$ over all feasible surgeries in $F$, we have $r_{g_1} \le r_{o_1}$. Replacing $o_1$ with $g_1$ in $O$ yields $O' = \{g_1, o_2, \dots, o_m\}$, which remains valid because $s_{o_2} \ge r_{o_1} \ge r_{g_1}$ and $g_1$ is active-feasible against $H$ and $[A, B]$.
+- **Base Claim ($k \ge 1$)**: Since $g_1$ minimizes $r_i$ over all feasible surgeries in $F$, $r_{g_1} \le r_{o_1}$. Replacing $o_1$ with $g_1$ in $O$ yields $O' = \{g_1, o_2, \dots, o_m\}$, which remains valid because $s_{o_2} \ge r_{o_1} \ge r_{g_1}$ and $g_1$ is active-feasible against $H$ and $[A, B]$.
 - **Inductive Step ("Greedy Stays Ahead")**: Assume $g_1, \dots, g_t$ have been selected with $r_{g_t} \le r_{o_t}$. Because $s_{o_{t+1}} \ge r_{o_t} \ge r_{g_t}$, surgery $o_{t+1}$ is available to Adapted Greedy at step $t + 1$. Therefore Adapted Greedy selects a surgery $g_{t+1}$ satisfying $r_{g_{t+1}} \le r_{o_{t+1}}$.
-- **Conclusion**: By induction, for every $t \le m$, $G$ contains at least $m$ surgeries ($k \ge m$). Since $O$ is optimal ($k \le m$), $k = m$, proving $G$ is 100% optimal.
+- **Conclusion**: By induction, $k = m$, proving $G$ is 100% optimal.
 
 ### 5.2. Adapted Dynamic Programming Optimality Proof (*Optimal Substructure*)
 After sorting the $n' \le n$ active-feasible surgeries by non-decreasing $r_i$, define for each $i \in \{1, \dots, n'\}$:
@@ -158,7 +151,7 @@ $$p(i) = \max\big(\{0\} \cup \{j \in \{1, \dots, i-1\} \mid r_j \le s_i\}\big)$$
 
 Because any valid surgery selected before $i$ must have $r_j \le s_i$ and the sequence is ordered by $r_1 \le r_2 \le \dots \le r_{n'}$, all compatible predecessors of $i$ lie in the contiguous prefix $\{1, \dots, p(i)\}$. Thus, the maximum cardinality over $\{1, \dots, i\}$ satisfies:
 $$DP[0] = 0, \qquad DP[i] = \max\big(DP[i - 1],\; 1 + DP[p(i)]\big)$$
-where $DP[i-1]$ represents omitting surgery $i$ and $1 + DP[p(i)]$ represents scheduling surgery $i$ together with an optimal compatible sub-schedule over $\{1, \dots, p(i)\}$. Backtracking from $i = n'$ down to $1$ recovers an exact optimal subset.
+Backtracking from $i = n'$ down to $1$ recovers an exact optimal subset.
 
 ### 5.3. Comparative Complexity Summary
 
@@ -166,10 +159,9 @@ where $DP[i-1]$ represents omitting surgery $i$ and $1 + DP[p(i)]$ represents sc
 |-----------------|----------------|-----------------------------|
 | **1. Active Feasibility Validation & $r_i$ Computation** | $\mathcal{O}(n)$ | $\mathcal{O}(n)$ |
 | **2. Sorting by Effective Release Time ($r_i$)** | $\mathcal{O}(n \log n)$ | $\mathcal{O}(n \log n)$ |
-| **3. Predecessor Computation $p(i)$** | *Not applicable* | $\mathcal{O}(n \log n)$ via binary search (or $\mathcal{O}(n)$ via two pointers when pre-sorted) |
+| **3. Predecessor Computation $p(i)$** | *Not applicable* | $\mathcal{O}(n \log n)$ via binary search (`bisect_right`) |
 | **4. Selection / DP Transition & Reconstruction** | $\mathcal{O}(n)$ linear scan | $\mathcal{O}(n)$ table fill + $\mathcal{O}(n)$ backtracking |
-| **Total Time Complexity (General Input)** | **$\mathcal{O}(n \log n)$** | **$\mathcal{O}(n \log n)$** |
-| **Total Time Complexity (Pre-Sorted Input)** | **$\mathcal{O}(n)$** | **$\mathcal{O}(n)$** (with two pointers for $p(i)$) |
+| **Total Time Complexity** | **$\mathcal{O}(n \log n)$** | **$\mathcal{O}(n \log n)$** |
 | **Auxiliary Space Complexity** | **$\mathcal{O}(n)$** | **$\mathcal{O}(n)$** (`DP[0..n']` and `p[1..n']`) |
 
 ---
@@ -184,7 +176,7 @@ where $DP[i-1]$ represents omitting surgery $i$ and $1 + DP[p(i)]$ represents sc
 
 ## Non-Functional Requirements
 
-- **[RNF-01]** Both Adapted Greedy and Adapted DP MUST achieve $\mathcal{O}(n \log n)$ worst-case time complexity on unsorted inputs and $\mathcal{O}(n)$ time complexity when pre-sorted inputs are supplied in pre-sorted mode.
+- **[RNF-01]** All four primary solvers (Classic Greedy, Classic DP, Adapted Greedy, Adapted DP) MUST run in $\mathcal{O}(n \log n)$ time complexity using sorting and binary search (`bisect_right`).
 - **[RNF-02]** Auxiliary space complexity MUST remain bounded by $\mathcal{O}(n)$ for both approaches.
 - **[RNF-03]** All domain specifications and mathematical definitions MUST be 100% documented in English (`en-US`).
 
@@ -199,3 +191,4 @@ where $DP[i-1]$ represents omitting surgery $i$ and $1 + DP[p(i)]$ represents sc
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-11-15 | `@allysson-assuncao` | Initial canonical consolidation of PAA assignment mandate, mathematical model, proofs, and counterexample |
+| 1.1.0 | 2026-11-24 | `@allysson-assuncao` | Consolidated `simplify-core-and-presentation-ui`: streamlined complexity model around the 4 core $\mathcal{O}(n \log n)$ solvers and `CASE-02` counterexample |

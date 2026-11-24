@@ -1,7 +1,7 @@
 ---
 id: "algorithms-and-domain-architecture"
 title: "Algorithms and Domain Architecture — Classic vs. Adapted Solvers"
-version: "1.4.0"
+version: "1.5.0"
 status: "active"
 owners:
   - "@allysson-assuncao"
@@ -22,7 +22,7 @@ resources:
 
 ## Context & Objectives
 
-To uphold SOLID principles, Clean Code, and side-by-side comparability between textbook baselines and authorial adaptations, the codebase separates immutable domain modeling, shift/interval validation, scheduling strategies, and empirical benchmarking into distinct, single-responsibility Python 3.12+ modules relying solely on the Python Standard Library for core algorithms.
+To uphold SOLID principles, Clean Code, and side-by-side comparability between textbook baselines and authorial adaptations, the codebase separates immutable domain modeling, shift/interval validation, scheduling strategies, and visual simulation into distinct, single-responsibility Python 3.12+ modules relying solely on the Python Standard Library.
 
 ---
 
@@ -35,7 +35,7 @@ All core data structures MUST be immutable (`@dataclass(frozen=True)`) and typed
   - `CLEAN = "CLEAN"`
   - `CONTAMINATED = "CONTAMINATED"`
 - **`ShiftWindow`**:
-  - `start: int` ($A$, in integer time units such as minutes from day start)
+  - `start: int` ($A$, in integer minutes from day start)
   - `end: int` ($B$)
   - **Invariant**: $0 \le A < B$.
 - **`ShiftConfig`**:
@@ -75,7 +75,7 @@ All core data structures MUST be immutable (`@dataclass(frozen=True)`) and typed
 
 ## 2. Unified Strategy Contract & Shared Kernel (Dependency Inversion)
 
-All schedulers MUST implement a shared Python `Protocol` so benchmarking harnesses, comparative tests, and the visual interface depend only on the abstraction:
+All schedulers MUST implement a shared Python `Protocol` so comparative tests, the exact oracle harness, and the visual interface depend only on the abstraction:
 
 ```python
 class IntervalSchedulerProtocol(Protocol):
@@ -86,12 +86,10 @@ class IntervalSchedulerProtocol(Protocol):
         self,
         surgeries: Sequence[SurgeryRequest],
         shift_config: ShiftConfig | None = None,
-        *,
-        is_presorted: bool = False,
     ) -> SchedulingResult: ...
 ```
 
-`src/schedulers/protocol.py` also provides `order_processed_surgeries` (sorting or validating by `(effective_release_time, request.finish_time, request.start_time)`), `select_greedy_processed_surgeries`, `validate_presorted_start_indices`, and the parameterized unweighted interval DP kernel (`solve_interval_dp`) shared by both `ClassicDPScheduler` and `AdaptedDPScheduler` to eliminate duplicated DP, two-pointer/binary-search predecessor, and backtracking logic.
+`src/schedulers/protocol.py` also provides `order_surgeries_by_key`, `order_processed_surgeries` (sorting in $\mathcal{O}(n \log n)$ by `(effective_release_time, request.finish_time, request.start_time)`), `select_greedy_processed_surgeries`, `compute_predecessors_binary_search` (`bisect.bisect_right` in $\mathcal{O}(n \log n)$), and the unweighted interval DP kernel (`solve_interval_dp`) shared by both `ClassicDPScheduler` and `AdaptedDPScheduler`.
 
 ---
 
@@ -99,70 +97,58 @@ class IntervalSchedulerProtocol(Protocol):
 
 Both classic algorithms serve as permanent comparative baselines reflecting standard textbook behavior before authorial adaptation.
 
-### 3.1. `ClassicGreedyScheduler` ($\mathcal{O}(n \log n)$ / $\mathcal{O}(n)$ pre-sorted)
-- **Compatibility Criterion**: Operates strictly in **Pure Classic Textbook Mode** over active surgical intervals $[s_i, f_i]$ ($s_j \ge f_i$). It intentionally ignores `sterilization_duration` ($c_i$) and `shift_config` ($H$, $[A, B]$), setting `effective_release_time = request.finish_time` and `discarded_infeasible_count = 0`. *(The separate Naive Static Reduction comparator $f'_i = f_i + c_i$ with horizon filtering is paired with the adapted solvers for counterexample comparison.)*
+### 3.1. `ClassicGreedyScheduler` ($\mathcal{O}(n \log n)$)
+- **Compatibility Criterion**: Operates strictly in **Pure Classic Textbook Mode** over active surgical intervals $[s_i, f_i]$ ($s_j \ge f_i$). It intentionally ignores `sterilization_duration` ($c_i$) and `shift_config` ($H$, $[A, B]$), setting `effective_release_time = request.finish_time` and `discarded_infeasible_count = 0`.
 - **Steps**:
   1. Validate caller sequence without mutating it (raising `InvalidSchedulingInputError` on invalid sequence or `None`).
-  2. Unless `is_presorted=True`, sort surgeries by $(f_i, s_i)$ in $\mathcal{O}(n \log n)$. When `is_presorted=True`, validate non-decreasing $(f_i, s_i)$ order in a single $\mathcal{O}(n)$ pass (raising `InvalidSchedulingInputError` if unsorted).
+  2. Sort surgeries by $(f_i, s_i)$ in $\mathcal{O}(n \log n)$.
   3. Maintain `last_finish = -1`.
   4. Linearly scan in $\mathcal{O}(n)$: if $s_i \ge \text{last\_finish}$, append `ProcessedSurgery(request=i, effective_release_time=f_i)` and update `last_finish = f_i`.
 
-### 3.2. `ClassicDPScheduler` ($\mathcal{O}(n \log n)$ / $\mathcal{O}(n)$ pre-sorted)
+### 3.2. `ClassicDPScheduler` ($\mathcal{O}(n \log n)$)
 - **Compatibility Criterion**: Pure Classic Textbook Mode over $[s_i, f_i]$ (identical to `ClassicGreedyScheduler`).
 - **Steps**:
   1. Validate caller sequence without mutating it.
-  2. Unless `is_presorted=True`, sort surgeries by $(f_i, s_i)$ in $\mathcal{O}(n \log n)$. When `is_presorted=True`, validate non-decreasing $(f_i, s_i)$ order in $\mathcal{O}(n)$.
-  3. Compute 1-based predecessor array `p[1..n]`:
-     - **Two-pointer $\mathcal{O}(n)$ mode**: If `is_presorted=True` and an optional `presorted_start_indices: Sequence[int] | None = None` permutation ordered by `start_time` is supplied (validated in $\mathcal{O}(n)$), OR if `start_time` is already monotonically non-decreasing across the finish-sorted sequence (checked in $\mathcal{O}(n)$), compute predecessors via monotonic two-pointer scan in $\mathcal{O}(n)$.
-     - **Binary-search $\mathcal{O}(n \log n)$ mode**: Otherwise, build finish-time array $F = [f_1, \dots, f_n]$ and compute $p(i)$ using `bisect.bisect_right(F, s_i, lo=0, hi=i)` in $\mathcal{O}(n \log n)$.
+  2. Wrap each item with `effective_release_time = item.finish_time` and sort by `(f_i, s_i)` in $\mathcal{O}(n \log n)$.
+  3. Compute 1-based predecessor array `p[1..n]` via `compute_predecessors_binary_search` (`bisect.bisect_right`) in $\mathcal{O}(n \log n)$.
   4. Fill `dp[0..n]` iteratively where `dp[i] = max(dp[i - 1], 1 + dp[p[i]])` in $\mathcal{O}(n)$.
   5. Reconstruct optimal subset iteratively by backtracking from $i = n$ to $1$ in $\mathcal{O}(n)$.
 
 ---
 
-## 4. Authorial Adapted Solvers, Naive Comparator, Oracle & Benchmark
+## 4. Authorial Adapted Solvers, Exact Oracle & Visual Interface
 
 Both adapted algorithms share pure preprocessing helpers in `src/domain/preprocessing.py` running in $\mathcal{O}(n)$ time:
 
-### 4.1. Preprocessing: Feasibility Filter, Effective Release & Naive Reduction ($\mathcal{O}(n)$)
+### 4.1. Preprocessing: Feasibility Filter & Effective Release ($\mathcal{O}(n)$)
 - **`is_actively_feasible(surgery, shift_config)`**: returns `True` unconditionally when `shift_config is None`; otherwise enforces $f_i \le H$ and, when `shift_window = [A, B]` exists, enforces $f_i \le A$ or $s_i \ge B$.
 - **`compute_effective_release_time(surgery, shift_config)`**: computes $e_i = f_i + c_i$, returning $B$ if `shift_config` defines `[A, B]` with $f_i \le A$ and $A < e_i < B$, and $e_i$ otherwise.
 - **`preprocess_feasible_surgeries(surgeries, shift_config=None)`**: validates inputs and returns `(feasible_processed_surgeries, discarded_infeasible_count)` in $\mathcal{O}(n)$.
-- **`preprocess_naive_static_reduction(surgeries, shift_config=None)`** and **`NaiveReductionScheduler`** (`src/schedulers/naive_reduction.py`): apply the flawed static transformation $f'_i = f_i + c_i$ against active constraints $H$ and $[A, B]$ to demonstrate non-reducibility in `SC-02` and `SC-03`.
 
-### 4.2. `AdaptedGreedyScheduler` ($\mathcal{O}(n \log n)$ / $\mathcal{O}(n)$ pre-sorted)
+### 4.2. `AdaptedGreedyScheduler` ($\mathcal{O}(n \log n)$)
 1. Preprocess feasible surgeries and compute $r_i$ in $\mathcal{O}(n)$. When `shift_config=None`, $H$ and $[A, B]$ filtering is skipped (`discarded_infeasible_count = 0`) while biological cooldown release times $r_i = f_i + c_i$ remain enforced.
-2. Unless `is_presorted=True`, sort feasible items by `(effective_release_time, request.finish_time, request.start_time)` in $\mathcal{O}(n \log n)$ (or validate non-decreasing order in $\mathcal{O}(n)$ when `is_presorted=True`).
-3. Initialize `last_release = -1` and `selected = []`.
-4. Linear scan in $\mathcal{O}(n)$ via `select_greedy_processed_surgeries`:
-   - For each item, if `item.request.start_time >= last_release`:
-     - Append `item` to `selected`.
-     - Update `last_release = item.effective_release_time`.
-5. Return `SchedulingResult`.
+2. Sort feasible items by `(effective_release_time, request.finish_time, request.start_time)` in $\mathcal{O}(n \log n)$.
+3. Linear scan in $\mathcal{O}(n)$ via `select_greedy_processed_surgeries`: append items where `item.request.start_time >= last_release` and update `last_release = item.effective_release_time`.
+4. Return `SchedulingResult`.
 
-### 4.3. `AdaptedDPScheduler` ($\mathcal{O}(n \log n)$ / $\mathcal{O}(n)$ pre-sorted)
+### 4.3. `AdaptedDPScheduler` ($\mathcal{O}(n \log n)$)
 1. Preprocess feasible surgeries and compute $r_i$ in $\mathcal{O}(n)$ (skipping $H$/$[A, B]$ filtering when `shift_config=None`, while enforcing $r_i = f_i + c_i$).
-2. Passing `presorted_start_indices` when `is_presorted=False` or when any input item was filtered out by `shift_config` (`discarded_infeasible_count > 0`) MUST raise `InvalidSchedulingInputError`.
-3. Unless `is_presorted=True`, sort $n'$ feasible items by `(effective_release_time, request.finish_time, request.start_time)` in $\mathcal{O}(n \log n)$.
-4. Delegate predecessor resolution, DP table evaluation, and backtracking to the shared kernel `solve_interval_dp`:
-   - **Standard / binary-search mode**: computes $p(i+1) = \text{bisect\_right}(R, s_i, 0, i)$ in $\mathcal{O}(n \log n)$.
-   - **Pre-sorted two-pointer mode**: when `is_presorted=True` with validated `presorted_start_indices` (or monotonic `start_time`), computes predecessors via two pointers in $\mathcal{O}(n)$.
-   - Fills `dp[0..n']` and reconstructs the optimal subset iteratively via backtracking.
-5. Return `SchedulingResult`.
+2. Sort $n'$ feasible items by `(effective_release_time, request.finish_time, request.start_time)` in $\mathcal{O}(n \log n)$.
+3. Delegate predecessor resolution (`bisect_right` in $\mathcal{O}(n \log n)$), DP table evaluation ($\mathcal{O}(n)$), and iterative backtracking ($\mathcal{O}(n)$) to the shared kernel `solve_interval_dp`.
+4. Return `SchedulingResult`.
 
-### 4.4. `BruteForceOracleScheduler` & Empirical Benchmark (`src/schedulers/brute_force_oracle.py`, `src/benchmark/runner.py`)
+### 4.4. `BruteForceOracleScheduler` (`src/schedulers/brute_force_oracle.py`)
 - **`BruteForceOracleScheduler`**: implements `IntervalSchedulerProtocol` using exact branch-and-bound enumeration with `MAX_ORACLE_INPUT_SIZE = 20`, raising `InvalidSchedulingInputError` immediately when `len(surgeries) > 20`.
-- **`src/benchmark/runner.py`**: exposes `BenchmarkPoint`, `generate_synthetic_surgeries`, `run_scaling_benchmark`, and `format_benchmark_table` using strictly Python 3.12+ Standard Library modules (`collections.abc`, `dataclasses`, `math`, `random`, `statistics`).
 
 ### 4.5. Visual Simulation & Presentation Layer (`src/ui/`, `src/main.py`)
-- **`src/ui/scenarios_catalog.py`**: canonical single source of truth for deterministic presets `SC-01`..`SC-05` (`ScenarioPreset`, `get_scenario_presets`, `get_scenario_by_id`) reused by `tests/fixtures/scenarios.py`.
-- **`src/ui/tracer.py`**: decoupled multi-stage execution tracer (`TracePhase`, `SurgeryVisualStatus`, `SimulationStep`, `SimulationTrace`, `trace_scheduler_execution`) and 5-algorithm side-by-side comparator (`AlgorithmComparisonEntry`, `run_comparative_arena`). Production `IntervalSchedulerProtocol.schedule()` implementations in `src/schedulers/` remain strictly uninstrumented (`[RNF-02]`), and `trace_scheduler_execution` cross-validates final parity against `schedule()`.
-- **`src/ui/server.py`**: loopback `ThreadingHTTPServer` (`127.0.0.1` default) serving zero-dependency Vanilla HTML5/CSS3/ES6 JS + SVG static assets (`src/ui/static/`) and validated JSON API routes.
-- **`src/main.py`**: unified CLI and browser launcher entrypoint supporting `--host`, `--port`, `--no-browser`, `--scenario`, and `--benchmark`.
+- **`src/ui/scenarios_catalog.py`**: canonical single source of truth for didactic presets `CASE-01`..`CASE-04` (`ScenarioPreset`, `get_scenario_presets`, `get_scenario_by_id`) reused by `tests/fixtures/scenarios.py`.
+- **`src/ui/tracer.py`**: decoupled multi-stage execution tracer (`TracePhase`, `SurgeryVisualStatus`, `SimulationStep`, `SimulationTrace`, `trace_scheduler_execution`) and 4-algorithm side-by-side comparator (`AlgorithmComparisonEntry`, `run_comparative_arena`). Emits `complexity_summary` (rules, $\mathcal{O}(n \log n)$ / $\mathcal{O}(n)$ bounds, and per-phase operation counts), didactic `HH:MM (min)` variable formatting, and numeric `last_release_minutes` on `SimulationStep`. Production `IntervalSchedulerProtocol.schedule()` implementations in `src/schedulers/` remain strictly uninstrumented (`[RNF-02]`), and `trace_scheduler_execution` cross-validates final parity against `schedule()`.
+- **`src/ui/server.py`**: loopback `ThreadingHTTPServer` (`127.0.0.1` default) serving zero-dependency Vanilla HTML5/CSS3/ES6 JS + SVG static assets (`src/ui/static/`) and validated JSON API routes (`GET /api/scenarios`, `POST /api/trace`, `POST /api/compare`).
+- **`src/main.py`**: unified CLI and browser launcher entrypoint supporting `--host`, `--port`, `--no-browser`, `--scenario`, and `--algorithm`.
 
 ---
 
-## 5. Planned Repository Layout
+## 5. Repository Layout
 
 ```text
 escalonamento-intervalos-paa/
@@ -170,7 +156,6 @@ escalonamento-intervalos-paa/
 │   └── rules/AGENTS.md
 ├── openspec/
 │   ├── specs/
-│   ├── changes/
 │   └── archive/
 ├── src/
 │   ├── __init__.py
@@ -184,22 +169,18 @@ escalonamento-intervalos-paa/
 │   │   ├── protocol.py            # IntervalSchedulerProtocol & shared DP/ordering kernel
 │   │   ├── classic_greedy.py      # ClassicGreedyScheduler (Baseline)
 │   │   ├── classic_dp.py          # ClassicDPScheduler (Baseline)
-│   │   ├── naive_reduction.py     # NaiveReductionScheduler (f'_i = f_i + c_i comparator)
 │   │   ├── adapted_greedy.py      # AdaptedGreedyScheduler (Authorial)
 │   │   ├── adapted_dp.py          # AdaptedDPScheduler (Authorial)
 │   │   └── brute_force_oracle.py  # Exact oracle (n <= 20) for test cross-validation
-│   ├── benchmark/
-│   │   ├── __init__.py
-│   │   └── runner.py              # Comparative runtime & optimality benchmark runner
 │   ├── ui/
 │   │   ├── __init__.py
-│   │   ├── scenarios_catalog.py   # Canonical SC-01..SC-05 presets shared with tests
-│   │   ├── tracer.py              # Multi-stage step tracer & 5-algorithm comparator
+│   │   ├── scenarios_catalog.py   # Canonical CASE-01..CASE-04 presets shared with tests
+│   │   ├── tracer.py              # Multi-stage step tracer, complexity_summary & 4-way comparator
 │   │   ├── server.py              # Loopback ThreadingHTTPServer & validated JSON API
 │   │   └── static/
-│   │       ├── index.html         # 3-tab presentation UI + live HH:MM input editor
-│   │       ├── styles.css         # High-contrast classroom-projector stylesheet
-│   │       └── app.js             # Step playback, SVG Gantt, arrays & benchmark charts
+│   │       ├── index.html         # 2-tab presentation UI + live HH:MM input editor
+│   │       ├── styles.css         # Classroom-projector stylesheet
+│   │       └── app.js             # Step playback, complexity card, aligned SVG Gantts
 │   └── main.py                    # CLI & local web server entrypoint
 ├── tests/
 │   ├── fixtures/
@@ -212,7 +193,6 @@ escalonamento-intervalos-paa/
 │   ├── test_ui_tracer_and_server.py
 │   └── test_documentation_integrity.py
 ├── docs/
-│   ├── relatorio-testes-benchmark-complexidade.md
 │   └── guia-revisao-arquitetura-e-apresentacao.md
 ├── pyproject.toml
 ├── README.md
@@ -232,7 +212,7 @@ escalonamento-intervalos-paa/
 ## Non-Functional Requirements
 
 - **[RNF-01]** Core scheduling modules (`src/domain/`, `src/schedulers/`) MUST have zero third-party runtime dependencies, relying strictly on Python 3.12+ Standard Library modules.
-- **[RNF-02]** Each scheduler module MUST adhere to Single Responsibility and remain concise, readable, and strictly typed.
+- **[RNF-02]** Each scheduler module MUST adhere to Single Responsibility and remain concise, readable, and strictly typed, keeping production schedulers uninstrumented by tracer logic.
 - **[RNF-03]** Brute-force oracle execution MUST reject any input with $n > 20$ to prevent exponential execution lockups.
 
 ## Out of Scope
@@ -245,7 +225,8 @@ escalonamento-intervalos-paa/
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-11-15 | `@allysson-assuncao` | Initial specification of domain models, SOLID contracts, classic baselines, adapted algorithms, and package layout |
-| 1.1.0 | 2026-11-15 | `@allysson-assuncao` | Consolidated `implement-classic-baseline`: finalized Pure Classic Textbook Mode, $\mathcal{O}(n)$ pre-sorted validation, and `presorted_start_indices` two-pointer DP predecessor contract |
-| 1.2.0 | 2026-11-18 | `@allysson-assuncao` | Consolidated `implement-adapted-surgical-scheduling`: acyclic domain preprocessing, shared DP kernel, `NaiveReductionScheduler`, `AdaptedGreedyScheduler`, `AdaptedDPScheduler`, `BruteForceOracleScheduler` ($n \le 20$), and `src/benchmark/runner.py` |
-| 1.3.0 | 2026-11-18 | `@allysson-assuncao` | Consolidated `implement-visual-simulation-interface`: added zero-dependency `src/ui/` (`scenarios_catalog.py`, `tracer.py`, `server.py`, `static/`), `src/main.py`, and `tests/test_ui_tracer_and_server.py` while keeping `src/schedulers/` uninstrumented |
-| 1.4.0 | 2026-11-19 | `@allysson-assuncao` | Consolidated `deliver-project-documentation-and-presentation-guide`: added `docs/relatorio-testes-benchmark-complexidade.md`, `docs/guia-revisao-arquitetura-e-apresentacao.md`, root `README.md`, and `tests/test_documentation_integrity.py` |
+| 1.1.0 | 2026-11-15 | `@allysson-assuncao` | Consolidated `implement-classic-baseline`: finalized Pure Classic Textbook Mode and DP contracts |
+| 1.2.0 | 2026-11-18 | `@allysson-assuncao` | Consolidated `implement-adapted-surgical-scheduling`: acyclic domain preprocessing, shared DP kernel, `AdaptedGreedyScheduler`, `AdaptedDPScheduler`, and `BruteForceOracleScheduler` ($n \le 20$) |
+| 1.3.0 | 2026-11-18 | `@allysson-assuncao` | Consolidated `implement-visual-simulation-interface`: added zero-dependency `src/ui/` (`scenarios_catalog.py`, `tracer.py`, `server.py`, `static/`), `src/main.py`, and `tests/test_ui_tracer_and_server.py` |
+| 1.4.0 | 2026-11-19 | `@allysson-assuncao` | Consolidated `deliver-project-documentation-and-presentation-guide`: added presentation guide, root `README.md`, and `tests/test_documentation_integrity.py` |
+| 1.5.0 | 2026-11-24 | `@allysson-assuncao` | Consolidated `simplify-core-and-presentation-ui`: removed `NaiveReductionScheduler`, `is_presorted`/`presorted_start_indices` two-pointer permutation machinery, `src/benchmark/`, and `/api/generate` + `/api/benchmark`; enriched tracer with `complexity_summary` and `last_release_minutes` |
