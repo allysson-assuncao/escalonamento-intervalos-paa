@@ -1,16 +1,9 @@
-"""Testes de validação cruzada com oráculo exato e benchmark de escalabilidade."""
+"""Testes de validação cruzada com oráculo exato (branch-and-bound)."""
 
-import math
 import random
 
 import pytest
 
-from src.benchmark import (
-    BenchmarkPoint,
-    format_benchmark_table,
-    generate_synthetic_surgeries,
-    run_scaling_benchmark,
-)
 from src.domain import (
     InvalidSchedulingInputError,
     ProcessedSurgery,
@@ -125,67 +118,15 @@ class TestOracleCrossValidation:
 
     def test_te04_oracle_rejects_input_above_limit(self) -> None:
         """TE-04: Oráculo exato rejeita n = 21 imediatamente antes de enumerar."""
-        surgeries = generate_synthetic_surgeries(MAX_ORACLE_INPUT_SIZE + 1, seed=7)
+        surgeries = [
+            SurgeryRequest(
+                surgery_id=f"S{i}",
+                start_time=i * 10,
+                finish_time=i * 10 + 5,
+            )
+            for i in range(MAX_ORACLE_INPUT_SIZE + 1)
+        ]
         oracle = BruteForceOracleScheduler()
 
         with pytest.raises(InvalidSchedulingInputError):
             oracle.schedule(surgeries)
-
-
-class TestBenchmarkRunner:
-    """Testes de fumaça e validação defensiva para src/benchmark/runner.py."""
-
-    def test_tp07_scaling_benchmark_and_table_formatting(self) -> None:
-        """TP-07: Executa benchmark em tamanhos pequenos e verifica métricas e tabela."""
-        shift_config = ShiftConfig(
-            closing_horizon=1080,
-            shift_window=ShiftWindow(start=720, end=780),
-        )
-        points = run_scaling_benchmark(
-            sizes=(50, 100, 200),
-            shift_config=shift_config,
-            repetitions=3,
-            seed=123,
-        )
-
-        # 3 tamanhos * 4 escalonadores padrão = 12 registros
-        assert len(points) == 12
-        for point in points:
-            assert isinstance(point, BenchmarkPoint)
-            assert point.input_size in {50, 100, 200}
-            assert 0 <= point.feasible_count <= point.input_size
-            assert 0 <= point.total_selected <= point.feasible_count
-            assert point.median_elapsed_ns >= 0.0
-            assert point.mean_elapsed_ns >= 0.0
-            assert math.isfinite(point.ratio_n_log_n)
-            assert math.isfinite(point.ratio_n)
-
-        # Modo pré-ordenado também deve executar sem falhas
-        presorted_points = run_scaling_benchmark(
-            sizes=(50,),
-            shift_config=shift_config,
-            repetitions=2,
-            is_presorted=True,
-        )
-        assert len(presorted_points) == 4
-        assert all(point.is_presorted for point in presorted_points)
-
-        table = format_benchmark_table(points)
-        assert "Algorithm" in table
-        assert "Adapted Greedy" in table
-        assert "Adapted Dynamic Programming" in table
-
-    def test_te06_benchmark_and_generator_validation_guards(self) -> None:
-        """TE-06: Gerador e benchmark rejeitam parâmetros inválidos."""
-        with pytest.raises(InvalidSchedulingInputError):
-            generate_synthetic_surgeries(-1)
-        with pytest.raises(InvalidSchedulingInputError):
-            generate_synthetic_surgeries(10, contaminated_ratio=1.5)
-        with pytest.raises(InvalidSchedulingInputError):
-            generate_synthetic_surgeries(10, horizon=0)
-        with pytest.raises(InvalidSchedulingInputError):
-            run_scaling_benchmark(sizes=())
-        with pytest.raises(InvalidSchedulingInputError):
-            run_scaling_benchmark(sizes=(10,), repetitions=0)
-        with pytest.raises(InvalidSchedulingInputError):
-            run_scaling_benchmark(sizes=(10,), shift_config="bad")  # type: ignore[arg-type]

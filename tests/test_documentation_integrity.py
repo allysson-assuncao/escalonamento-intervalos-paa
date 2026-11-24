@@ -8,10 +8,9 @@ import pytest
 REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 DOCS_DIR: Path = REPO_ROOT / "docs"
 README_PATH: Path = REPO_ROOT / "README.md"
-REPORT_PATH: Path = DOCS_DIR / "relatorio-testes-benchmark-complexidade.md"
 GUIDE_PATH: Path = DOCS_DIR / "guia-revisao-arquitetura-e-apresentacao.md"
 
-DOC_FILES: tuple[Path, ...] = (README_PATH, REPORT_PATH, GUIDE_PATH)
+DOC_FILES: tuple[Path, ...] = (README_PATH, GUIDE_PATH)
 
 _LINK_PATTERN = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _LINE_ANCHOR_PATTERN = re.compile(r"^L(\d+)(?:-L(\d+))?$")
@@ -77,7 +76,7 @@ class TestDocumentationIntegrityHappyPath:
     """Validação de existência, seções, links relativos e intervalos #Lxx-Lyy."""
 
     def test_tp01_required_docs_exist_and_contain_mandated_sections(self) -> None:
-        """TP-01: Verifica presença dos 3 documentos e suas seções obrigatórias."""
+        """TP-01: Verifica presença dos 2 documentos e suas seções obrigatórias."""
         for path in DOC_FILES:
             assert path.is_file(), f"Documento obrigatório ausente: {path}"
             content = path.read_text(encoding="utf-8")
@@ -86,22 +85,11 @@ class TestDocumentationIntegrityHappyPath:
         readme = README_PATH.read_text(encoding="utf-8")
         for marker in (
             "Problema Original vs. Adaptação Autoral",
-            "Contrexemplo `SC-02`",
+            "Contrexemplo `CASE-02`",
             "Instalação, Execução e Testes",
-            "docs/relatorio-testes-benchmark-complexidade.md",
             "docs/guia-revisao-arquitetura-e-apresentacao.md",
         ):
             assert marker in readme
-
-        report = REPORT_PATH.read_text(encoding="utf-8")
-        for marker in (
-            "SC-01",
-            "SC-05b",
-            "180 instâncias",
-            "xychart-beta",
-            "10000",
-        ):
-            assert marker in report
 
         guide = GUIDE_PATH.read_text(encoding="utf-8")
         for marker in (
@@ -135,7 +123,7 @@ class TestDocumentationIntegrityHappyPath:
                         )
 
         assert total_links >= 15
-        assert total_anchored_links >= 30
+        assert total_anchored_links >= 20
 
 
 class TestDocumentationIntegrityEdgeCases:

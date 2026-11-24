@@ -1,4 +1,4 @@
-"""Testes unitários e comparativos dos escalonadores adaptados e redução ingênua."""
+"""Testes unitários e comparativos dos escalonadores adaptados."""
 
 import pytest
 
@@ -6,6 +6,7 @@ from src.domain import (
     InvalidSchedulingInputError,
     ProcessedSurgery,
     ShiftConfig,
+    ShiftWindow,
     SurgeryRequest,
     SurgeryType,
 )
@@ -16,15 +17,12 @@ from src.schedulers import (
     ClassicDPScheduler,
     ClassicGreedyScheduler,
     IntervalSchedulerProtocol,
-    NaiveReductionScheduler,
 )
 from tests.fixtures.scenarios import (
-    build_monotonic_start_presorted_surgeries,
-    build_sc01_classic_homogeneous_surgeries,
-    build_sc02_counterexample_surgeries,
-    build_sc03_end_of_shift_boundary,
-    build_sc04_shift_window_scenarios,
-    build_sc05_edge_case_scenarios,
+    build_case01_classic_baseline,
+    build_case02_sterilization_and_horizon,
+    build_case03_shift_window,
+    build_case04_full_mixed_shift,
 )
 
 
@@ -45,29 +43,28 @@ def _assert_valid_adapted_schedule(
 
 
 class TestAdaptedSchedulersHappyPath:
-    """Casos principais e provas comparativas entre abordagens clássica, ingênua e adaptada."""
+    """Casos principais e provas comparativas entre abordagens clássica e adaptada."""
 
     def test_protocol_conformance(self) -> None:
-        """Verifica que todos os novos escalonadores aderem a IntervalSchedulerProtocol."""
+        """Verifica que todos os escalonadores aderem a IntervalSchedulerProtocol."""
         for scheduler in (
             AdaptedGreedyScheduler(),
             AdaptedDPScheduler(),
-            NaiveReductionScheduler(),
             BruteForceOracleScheduler(),
         ):
             assert isinstance(scheduler, IntervalSchedulerProtocol)
 
-    def test_tp02_sc01_backward_compatibility_with_classic(self) -> None:
-        """TP-02: Com shift_config=None e cirurgias CLEAN, adaptados igualam clássicos."""
-        surgeries = build_sc01_classic_homogeneous_surgeries()
+    def test_tp01_case01_backward_compatibility_with_classic(self) -> None:
+        """TP-01: Em CASE-01 (CLEAN, sem janela), adaptados igualam clássicos (3)."""
+        surgeries, shift_config = build_case01_classic_baseline()
 
-        classic_g = ClassicGreedyScheduler().schedule(surgeries)
-        classic_dp = ClassicDPScheduler().schedule(surgeries)
-        adapted_g = AdaptedGreedyScheduler().schedule(surgeries, shift_config=None)
-        adapted_dp = AdaptedDPScheduler().schedule(surgeries, shift_config=None)
+        classic_g = ClassicGreedyScheduler().schedule(surgeries, shift_config)
+        classic_dp = ClassicDPScheduler().schedule(surgeries, shift_config)
+        adapted_g = AdaptedGreedyScheduler().schedule(surgeries, shift_config)
+        adapted_dp = AdaptedDPScheduler().schedule(surgeries, shift_config)
 
-        assert adapted_g.total_selected == 5
-        assert adapted_dp.total_selected == 5
+        assert adapted_g.total_selected == 3
+        assert adapted_dp.total_selected == 3
         assert adapted_g.discarded_infeasible_count == 0
         assert adapted_dp.discarded_infeasible_count == 0
         assert [x.request.surgery_id for x in adapted_g.selected_surgeries] == [
@@ -112,14 +109,13 @@ class TestAdaptedSchedulersHappyPath:
             ]
             _assert_valid_adapted_schedule(result.selected_surgeries, None)
 
-    def test_tp03_sc02_counterexample_defeats_classic_and_naive(self) -> None:
-        """TP-03: No SC-02, Adaptados e Oráculo escolhem {S2, S3} (2); Ingênuo e Clássico falham."""
-        surgeries, shift_config = build_sc02_counterexample_surgeries()
+    def test_tp02_case02_counterexample_defeats_classic(self) -> None:
+        """TP-02: Em CASE-02, Adaptados e Oráculo escolhem {S2, S3} (2); Clássicos erram."""
+        surgeries, shift_config = build_case02_sterilization_and_horizon()
 
         adapted_g = AdaptedGreedyScheduler().schedule(surgeries, shift_config)
         adapted_dp = AdaptedDPScheduler().schedule(surgeries, shift_config)
         oracle = BruteForceOracleScheduler().schedule(surgeries, shift_config)
-        naive = NaiveReductionScheduler().schedule(surgeries, shift_config)
         classic_g = ClassicGreedyScheduler().schedule(surgeries, shift_config)
 
         assert adapted_g.total_selected == 2
@@ -131,163 +127,136 @@ class TestAdaptedSchedulersHappyPath:
         _assert_valid_adapted_schedule(adapted_g.selected_surgeries, shift_config)
         _assert_valid_adapted_schedule(adapted_dp.selected_surgeries, shift_config)
 
-        # Redução ingênua descarta S3 e obtém no máximo 1 cirurgia
-        assert naive.discarded_infeasible_count == 1
-        assert naive.total_selected == 1
-
-        # Guloso clássico escolhe S1 primeiro (f_1 = 14:00 < f_2 = 15:00), bloqueando a sala até 16:00
+        # Guloso clássico escolhe S1 primeiro (f_1 = 14:00 < f_2 = 15:00), gerando conflito com S3
         assert classic_g.selected_surgeries[0].request.surgery_id == "S1"
 
-    def test_tp04_sc03_and_sc04_shift_window_behaviors(self) -> None:
-        """TP-04: Valida SC-03 e subcenários SC-04b (absorção) e SC-04c (transbordamento)."""
-        sc03_surgeries, sc03_config = build_sc03_end_of_shift_boundary()
-        for scheduler in (AdaptedGreedyScheduler(), AdaptedDPScheduler()):
-            res_sc03 = scheduler.schedule(sc03_surgeries, sc03_config)
-            assert res_sc03.total_selected == 1
-            assert res_sc03.discarded_infeasible_count == 1
-            assert res_sc03.selected_surgeries[0].request.surgery_id == "S_END"
-            assert res_sc03.selected_surgeries[0].effective_release_time == 1100
-
-        scenarios, sc04_config = build_sc04_shift_window_scenarios()
-        for scheduler in (AdaptedGreedyScheduler(), AdaptedDPScheduler()):
-            res_4b = scheduler.schedule(scenarios["SC-04b"], sc04_config)
-            assert res_4b.total_selected == 2
-            assert [x.request.surgery_id for x in res_4b.selected_surgeries] == [
-                "ABSORBED",
-                "NEXT_AT_B",
+    def test_tp03_case03_shift_window_absorption_and_filtering(self) -> None:
+        """TP-03: Em CASE-03, descarta S2/S3, absorve esterilização de S1 e escolhe {S1, S4, S5}."""
+        surgeries, shift_config = build_case03_shift_window()
+        for scheduler in (
+            AdaptedGreedyScheduler(),
+            AdaptedDPScheduler(),
+            BruteForceOracleScheduler(),
+        ):
+            res = scheduler.schedule(surgeries, shift_config)
+            assert res.discarded_infeasible_count == 2
+            assert res.total_selected == 3
+            assert [x.request.surgery_id for x in res.selected_surgeries] == [
+                "S1",
+                "S4",
+                "S5",
             ]
-            assert res_4b.selected_surgeries[0].effective_release_time == 780
+            assert res.selected_surgeries[0].effective_release_time == 780
+            _assert_valid_adapted_schedule(res.selected_surgeries, shift_config)
 
-            res_4c = scheduler.schedule(scenarios["SC-04c"], sc04_config)
-            assert res_4c.total_selected == 2
-            assert [x.request.surgery_id for x in res_4c.selected_surgeries] == [
-                "OVERFLOW",
-                "VALID_AFTER_RELEASE",
+    def test_tp04_case04_full_mixed_shift_equivalence(self) -> None:
+        """TP-04: Em CASE-04 (7 cirurgias mistas), Adaptados e Oráculo selecionam {S2, S3, S6, S7}."""
+        surgeries, shift_config = build_case04_full_mixed_shift()
+        for scheduler in (
+            AdaptedGreedyScheduler(),
+            AdaptedDPScheduler(),
+            BruteForceOracleScheduler(),
+        ):
+            res = scheduler.schedule(surgeries, shift_config)
+            assert res.discarded_infeasible_count == 1
+            assert res.total_selected == 4
+            assert [x.request.surgery_id for x in res.selected_surgeries] == [
+                "S2",
+                "S3",
+                "S6",
+                "S7",
             ]
-            assert res_4c.selected_surgeries[0].effective_release_time == 795
-
-    def test_tp05_presorted_mode_matches_general_mode(self) -> None:
-        """TP-05: is_presorted=True (monótono e com presorted_start_indices) equivale ao geral."""
-        greedy = AdaptedGreedyScheduler()
-        dp = AdaptedDPScheduler()
-
-        monotonic = build_monotonic_start_presorted_surgeries()
-        assert greedy.schedule(monotonic, is_presorted=True).total_selected == (
-            greedy.schedule(monotonic, is_presorted=False).total_selected
-        )
-        assert dp.schedule(monotonic, is_presorted=True).total_selected == (
-            dp.schedule(monotonic, is_presorted=False).total_selected
-        )
-
-        sc01_sorted = sorted(
-            build_sc01_classic_homogeneous_surgeries(),
-            key=lambda s: (s.finish_time + s.sterilization_duration, s.finish_time, s.start_time),
-        )
-        start_indices = sorted(
-            range(len(sc01_sorted)),
-            key=lambda idx: sc01_sorted[idx].start_time,
-        )
-
-        dp_general = dp.schedule(sc01_sorted, is_presorted=False)
-        dp_presorted = dp.schedule(sc01_sorted, is_presorted=True)
-        dp_two_ptr = dp.schedule(
-            sc01_sorted,
-            is_presorted=True,
-            presorted_start_indices=start_indices,
-        )
-
-        assert dp_presorted.total_selected == dp_general.total_selected == 5
-        assert dp_two_ptr.total_selected == dp_general.total_selected == 5
-        assert [x.request.surgery_id for x in dp_two_ptr.selected_surgeries] == [
-            x.request.surgery_id for x in dp_general.selected_surgeries
-        ]
+            _assert_valid_adapted_schedule(res.selected_surgeries, shift_config)
 
 
 class TestAdaptedSchedulersEdgeCases:
-    """Casos extremos, empates em r_i e validações defensivas de pré-ordenação."""
+    """Casos extremos, fronteira de turno, empates em r_i e imutabilidade."""
 
-    def test_te01_sc04a_window_rejection_and_boundary_acceptance(self) -> None:
-        """TE-01: SC-04a descarta sobreposições ativas e agenda cirurgias nas bordas."""
-        scenarios, sc04_config = build_sc04_shift_window_scenarios()
+    def test_te01_end_of_shift_passive_sterilization_boundary(self) -> None:
+        """TE-01: Cirurgia terminando até H com esterilização após H é aceita; f_i > H falha."""
+        shift_config = ShiftConfig(closing_horizon=1080)
+        surgeries = [
+            SurgeryRequest(
+                surgery_id="S_END",
+                start_time=1040,
+                finish_time=1070,
+                surgery_type=SurgeryType.CONTAMINATED,
+                sterilization_duration=30,  # e = 1100 > H
+            ),
+            SurgeryRequest(
+                surgery_id="S_OVER",
+                start_time=1050,
+                finish_time=1081,
+                surgery_type=SurgeryType.CLEAN,
+            ),
+        ]
         for scheduler in (AdaptedGreedyScheduler(), AdaptedDPScheduler()):
-            res = scheduler.schedule(scenarios["SC-04a"], sc04_config)
-            assert res.discarded_infeasible_count == 2
-            assert res.total_selected == 2
-            assert [x.request.surgery_id for x in res.selected_surgeries] == [
-                "TOUCH_PRE",
-                "TOUCH_POST",
-            ]
+            res = scheduler.schedule(surgeries, shift_config)
+            assert res.total_selected == 1
+            assert res.discarded_infeasible_count == 1
+            assert res.selected_surgeries[0].request.surgery_id == "S_END"
+            assert res.selected_surgeries[0].effective_release_time == 1100
 
-    def test_te02_sc05_empty_single_all_infeasible_and_release_ties(self) -> None:
+    def test_te02_empty_single_all_infeasible_and_release_ties(self) -> None:
         """TE-02: Valida entrada vazia, unitária, todas inviáveis e empates em r_i."""
-        (all_infeasible, cfg_inf), (ties, cfg_ties) = build_sc05_edge_case_scenarios()
+        shift_config = ShiftConfig(
+            closing_horizon=1080,
+            shift_window=ShiftWindow(start=720, end=780),
+        )
+        all_infeasible = [
+            SurgeryRequest(surgery_id="INF_WIN_1", start_time=700, finish_time=740),
+            SurgeryRequest(surgery_id="INF_WIN_2", start_time=720, finish_time=760),
+            SurgeryRequest(surgery_id="INF_HORIZON", start_time=1020, finish_time=1090),
+        ]
+        ties = [
+            SurgeryRequest(
+                surgery_id="TIE_ABSORBED",
+                start_time=675,
+                finish_time=705,
+                surgery_type=SurgeryType.CONTAMINATED,
+                sterilization_duration=45,  # e = 750 -> r_i = 780
+            ),
+            SurgeryRequest(
+                surgery_id="TIE_EXACT_B",
+                start_time=660,
+                finish_time=720,
+                surgery_type=SurgeryType.CONTAMINATED,
+                sterilization_duration=60,  # e = 780 -> r_i = 780
+            ),
+            SurgeryRequest(
+                surgery_id="FOLLOWUP",
+                start_time=780,
+                finish_time=840,
+            ),
+        ]
 
         for scheduler in (AdaptedGreedyScheduler(), AdaptedDPScheduler()):
-            empty_res = scheduler.schedule([], cfg_inf)
+            empty_res = scheduler.schedule([], shift_config)
             assert empty_res.total_selected == 0
             assert empty_res.discarded_infeasible_count == 0
 
             single_res = scheduler.schedule(
-                [SurgeryRequest("ONE", start_time=100, finish_time=200)], cfg_inf
+                [SurgeryRequest("ONE", start_time=100, finish_time=200)], shift_config
             )
             assert single_res.total_selected == 1
             assert single_res.discarded_infeasible_count == 0
 
-            all_inf_res = scheduler.schedule(all_infeasible, cfg_inf)
+            all_inf_res = scheduler.schedule(all_infeasible, shift_config)
             assert all_inf_res.total_selected == 0
             assert all_inf_res.discarded_infeasible_count == 3
 
-            tie_res = scheduler.schedule(ties, cfg_ties)
+            tie_res = scheduler.schedule(ties, shift_config)
             assert tie_res.total_selected == 2
-            _assert_valid_adapted_schedule(tie_res.selected_surgeries, cfg_ties)
+            _assert_valid_adapted_schedule(tie_res.selected_surgeries, shift_config)
 
-    def test_te05_presorted_rejects_unsorted_and_filtered_start_indices(self) -> None:
-        """TE-05: Rejeita entrada não ordenada e presorted_start_indices após descarte."""
-        unsorted = [
-            SurgeryRequest("B", start_time=20, finish_time=40),
-            SurgeryRequest("A", start_time=10, finish_time=30),
-        ]
-        for scheduler in (
-            AdaptedGreedyScheduler(),
-            AdaptedDPScheduler(),
-            NaiveReductionScheduler(),
-        ):
-            with pytest.raises(InvalidSchedulingInputError):
-                scheduler.schedule(unsorted, is_presorted=True)
-
-        # Caso com descarte por horizonte H e fornecimento de presorted_start_indices
-        dp = AdaptedDPScheduler()
-        sorted_with_infeasible = [
-            SurgeryRequest("OK", start_time=100, finish_time=200),
-            SurgeryRequest("OUT", start_time=900, finish_time=1100),
-        ]
-        with pytest.raises(InvalidSchedulingInputError):
-            dp.schedule(
-                sorted_with_infeasible,
-                ShiftConfig(closing_horizon=1080),
-                is_presorted=True,
-                presorted_start_indices=[0, 1],
-            )
-        with pytest.raises(InvalidSchedulingInputError):
-            dp.schedule(
-                sorted_with_infeasible[:1],
-                is_presorted=False,
-                presorted_start_indices=[0],
-            )
-
-    @pytest.mark.parametrize(
-        "scheduler_cls",
-        [AdaptedGreedyScheduler, AdaptedDPScheduler, NaiveReductionScheduler],
-    )
-    def test_te06_caller_non_mutation_and_invalid_inputs(
+    @pytest.mark.parametrize("scheduler_cls", [AdaptedGreedyScheduler, AdaptedDPScheduler])
+    def test_te03_caller_non_mutation_and_invalid_inputs(
         self,
-        scheduler_cls: type[AdaptedGreedyScheduler]
-        | type[AdaptedDPScheduler]
-        | type[NaiveReductionScheduler],
+        scheduler_cls: type[AdaptedGreedyScheduler] | type[AdaptedDPScheduler],
     ) -> None:
-        """TE-06: Lista original não é mutada e None/tipos inválidos disparam exceção."""
+        """TE-03: Lista original não é mutada e None/tipos inválidos disparam exceção."""
         scheduler = scheduler_cls()
-        surgeries, shift_config = build_sc02_counterexample_surgeries()
+        surgeries, shift_config = build_case02_sterilization_and_horizon()
         snapshot = list(surgeries)
 
         scheduler.schedule(surgeries, shift_config)

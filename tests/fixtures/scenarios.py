@@ -3,21 +3,17 @@
 from src.ui.scenarios_catalog import (
     DEFAULT_CLOSING_HORIZON,
     DEFAULT_SHIFT_WINDOW,
-    build_monotonic_start_presorted_surgeries,
-    build_sc01_classic_homogeneous_surgeries,
-    build_sc02_counterexample_surgeries,
-    build_sc03_end_of_shift_boundary,
-    build_sc04_shift_window_scenarios,
-    build_sc05_edge_case_scenarios,
+    build_case01_classic_baseline,
+    build_case02_sterilization_and_horizon,
+    build_case03_shift_window,
+    build_case04_full_mixed_shift,
 )
 
 __all__ = [
     "DEFAULT_CLOSING_HORIZON",
     "DEFAULT_SHIFT_WINDOW",
-    "build_monotonic_start_presorted_surgeries",
-    "build_sc01_classic_homogeneous_surgeries",
-    "build_sc02_counterexample_surgeries",
-    "build_sc03_end_of_shift_boundary",
-    "build_sc04_shift_window_scenarios",
-    "build_sc05_edge_case_scenarios",
+    "build_case01_classic_baseline",
+    "build_case02_sterilization_and_horizon",
+    "build_case03_shift_window",
+    "build_case04_full_mixed_shift",
 ]

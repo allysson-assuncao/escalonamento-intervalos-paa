@@ -11,8 +11,8 @@ import threading
 import pytest
 
 from src.domain import (
-    InvalidSchedulingInputError,
     ShiftConfig,
+    ShiftWindow,
     SurgeryRequest,
 )
 from src.main import main as cli_main
@@ -21,13 +21,10 @@ from src.schedulers import (
     AdaptedGreedyScheduler,
     ClassicDPScheduler,
     ClassicGreedyScheduler,
-    NaiveReductionScheduler,
 )
 from src.ui import (
     ALGORITHM_KEYS,
-    MAX_BENCHMARK_REPETITIONS,
-    MAX_BENCHMARK_SIZE,
-    MAX_GENERATE_SIZE,
+    MAX_COMPARE_INPUT_SIZE,
     MAX_REQUEST_BODY_BYTES,
     MAX_TRACE_INPUT_SIZE,
     SimulationTrace,
@@ -38,7 +35,6 @@ from src.ui import (
     run_comparative_arena,
     trace_scheduler_execution,
 )
-from tests.fixtures.scenarios import build_monotonic_start_presorted_surgeries
 
 
 @pytest.fixture()
@@ -82,15 +78,23 @@ class TestTracerAndComparatorHappyPath:
     """Testes de paridade do tracer multiestágio e arena comparativa (TP-01 a TP-03)."""
 
     def test_tp01_tracer_parity_across_scenarios_and_schedulers(self) -> None:
-        """TP-01: Traço passo a passo equivale 100% a schedule() em SC-01..SC-05."""
+        """TP-01: Traço passo a passo equivale 100% a schedule() em CASE-01..CASE-04."""
         scheduler_map = {
             "classic_greedy": ClassicGreedyScheduler(),
             "classic_dp": ClassicDPScheduler(),
-            "naive_reduction": NaiveReductionScheduler(),
             "adapted_greedy": AdaptedGreedyScheduler(),
             "adapted_dp": AdaptedDPScheduler(),
         }
-        for preset in get_scenario_presets():
+        presets = get_scenario_presets()
+        assert len(presets) == 4
+        assert [p.scenario_id for p in presets] == [
+            "CASE-01",
+            "CASE-02",
+            "CASE-03",
+            "CASE-04",
+        ]
+
+        for preset in presets:
             for key in ALGORITHM_KEYS:
                 trace = trace_scheduler_execution(
                     preset.surgeries,
@@ -107,20 +111,23 @@ class TestTracerAndComparatorHappyPath:
                     trace.final_result.discarded_infeasible_count
                     == official.discarded_infeasible_count
                 )
+                assert trace.complexity_summary["time_complexity"] == "O(n log n)"
+                assert trace.complexity_summary["space_complexity"] == "O(n)"
+                assert len(trace.complexity_summary["phases"]) >= 3  # type: ignore[arg-type]
+
                 last_step = trace.steps[-1]
                 assert last_step.phase == TracePhase.RESULT
                 assert last_step.selected_ids == tuple(
                     s.request.surgery_id for s in official.selected_surgeries
                 )
 
-    def test_tp02_adapted_dp_microsteps_and_phase_offsets(self) -> None:
-        """TP-02: AdaptedDPScheduler registra busca binária, dois ponteiros e offsets de fase."""
-        sc02 = get_scenario_by_id("SC-02")
-        trace_bisect = trace_scheduler_execution(
-            sc02.surgeries,
-            sc02.shift_config,
+    def test_tp02_adapted_dp_and_greedy_trace_details(self) -> None:
+        """TP-02: AdaptedDP registra busca binária e offsets; AdaptedGreedy expõe HH:MM e last_release_minutes."""
+        case02 = get_scenario_by_id("CASE-02")
+        trace_dp = trace_scheduler_execution(
+            case02.surgeries,
+            case02.shift_config,
             algorithm_key="adapted_dp",
-            is_presorted=False,
         )
 
         expected_phases = {
@@ -131,83 +138,62 @@ class TestTracerAndComparatorHappyPath:
             TracePhase.BACKTRACKING.value,
             TracePhase.RESULT.value,
         }
-        assert expected_phases.issubset(trace_bisect.phase_offsets.keys())
-        for phase_name, offset in trace_bisect.phase_offsets.items():
-            assert trace_bisect.steps[offset].phase.value == phase_name
+        assert expected_phases.issubset(trace_dp.phase_offsets.keys())
+        for phase_name, offset in trace_dp.phase_offsets.items():
+            assert trace_dp.steps[offset].phase.value == phase_name
 
-        # Verifica registro explícito de lo/mid/hi na busca binária e resultado {S2, S3}
         pred_steps = [
-            s for s in trace_bisect.steps if s.phase == TracePhase.PREDECESSORS
+            s for s in trace_dp.steps if s.phase == TracePhase.PREDECESSORS
         ]
-        assert any("lo" in s.variables and "hi" in s.variables for s in pred_steps)
-        assert trace_bisect.steps[-1].selected_ids == ("S2", "S3")
+        assert any(s.binary_search_range is not None for s in pred_steps)
+        assert trace_dp.steps[-1].selected_ids == ("S2", "S3")
 
-        # Modo pré-ordenado com inícios monótonos usa dois ponteiros em O(n)
-        monotonic = build_monotonic_start_presorted_surgeries()
-        trace_two_ptr = trace_scheduler_execution(
-            monotonic,
-            None,
-            algorithm_key="adapted_dp",
-            is_presorted=True,
+        # Verifica formatação HH:MM (min) e marcador numérico last_release_minutes no Guloso
+        case04 = get_scenario_by_id("CASE-04")
+        trace_greedy = trace_scheduler_execution(
+            case04.surgeries,
+            case04.shift_config,
+            algorithm_key="adapted_greedy",
         )
-        two_ptr_steps = [
-            s for s in trace_two_ptr.steps if s.phase == TracePhase.PREDECESSORS
+        greedy_steps = [
+            s for s in trace_greedy.steps if s.phase == TracePhase.SELECTION_OR_DP
         ]
-        assert any(s.variables.get("mode") == "two_pointers_O(n)" for s in two_ptr_steps)
-
-        # Modo pré-ordenado com presorted_start_indices explícito
-        sorted_sc02 = sorted(
-            sc02.surgeries,
-            key=lambda s: (
-                s.finish_time + s.sterilization_duration,
-                s.finish_time,
-                s.start_time,
-            ),
+        assert greedy_steps
+        assert any(s.last_release_minutes is not None for s in greedy_steps)
+        assert any(
+            "min)" in str(val) for val in greedy_steps[0].variables.values()
         )
-        start_indices = sorted(
-            range(len(sorted_sc02)), key=lambda i: sorted_sc02[i].start_time
-        )
-        trace_idx = trace_scheduler_execution(
-            sorted_sc02,
-            sc02.shift_config,
-            algorithm_key="adapted_dp",
-            is_presorted=True,
-            presorted_start_indices=start_indices,
-        )
-        assert trace_idx.steps[-1].selected_ids == ("S2", "S3")
+        assert trace_greedy.steps[-1].selected_ids == ("S2", "S3", "S6", "S7")
 
     def test_tp03_comparative_arena_and_conflict_detection(self) -> None:
-        """TP-03: Arena comparativa retorna 5 abordagens e detecta conflitos em SC-02 e SC-04a."""
-        sc02 = get_scenario_by_id("SC-02")
-        entries = run_comparative_arena(sc02.surgeries, sc02.shift_config)
-        assert len(entries) == 5
+        """TP-03: Arena comparativa retorna 4 abordagens e detecta conflitos em CASE-02 e CASE-03."""
+        case02 = get_scenario_by_id("CASE-02")
+        entries = run_comparative_arena(case02.surgeries, case02.shift_config)
+        assert len(entries) == 4
 
         by_key = {entry.algorithm_key: entry for entry in entries}
         assert by_key["adapted_greedy"].result.total_selected == 2
         assert by_key["adapted_dp"].result.total_selected == 2
         assert by_key["adapted_greedy"].is_physically_valid is True
         assert by_key["adapted_dp"].is_physically_valid is True
-
-        assert by_key["naive_reduction"].result.total_selected == 1
-        assert by_key["naive_reduction"].result.discarded_infeasible_count == 1
-        # Clássicos aceitam {S1, S3} ignorando esterilização de 2h de S1 -> conflito físico real
         assert by_key["classic_greedy"].is_physically_valid is False
         assert len(by_key["classic_greedy"].physical_conflicts) >= 1
 
-        sc04a = get_scenario_by_id("SC-04a")
-        entries_4a = run_comparative_arena(sc04a.surgeries, sc04a.shift_config)
-        by_key_4a = {entry.algorithm_key: entry for entry in entries_4a}
-        assert by_key_4a["adapted_greedy"].is_physically_valid is True
-        assert by_key_4a["classic_greedy"].is_physically_valid is False
+        case03 = get_scenario_by_id("CASE-03")
+        entries_03 = run_comparative_arena(case03.surgeries, case03.shift_config)
+        by_key_03 = {entry.algorithm_key: entry for entry in entries_03}
+        assert by_key_03["adapted_greedy"].is_physically_valid is True
+        assert by_key_03["adapted_dp"].is_physically_valid is True
+        assert by_key_03["classic_greedy"].is_physically_valid is False
 
 
 class TestHttpServerAndCliHappyPath:
-    """Testes de integração da API HTTP local e CLI headless (TP-04 a TP-07)."""
+    """Testes de integração da API HTTP local e CLI headless (TP-04 a TP-06)."""
 
     def test_tp04_static_assets_and_scenarios_endpoint(
         self, live_server: tuple[str, int]
     ) -> None:
-        """TP-04: GET /, /styles.css, /app.js e /api/scenarios retornam HTTP 200."""
+        """TP-04: GET /, /styles.css, /app.js e /api/scenarios retornam HTTP 200 com layout enxuto."""
         host, port = live_server
 
         for route, expected_mime, marker in (
@@ -220,24 +206,28 @@ class TestHttpServerAndCliHappyPath:
             assert expected_mime in ctype
             assert marker in raw
 
+        html_text = Path("src/ui/static/index.html").read_text(encoding="utf-8")
+        assert html_text.count('class="tab-btn') == 2
+        assert "complexity-summary-card" in html_text
+        assert "tab-benchmark" not in html_text
+        assert "presorted-checkbox" not in html_text
+        assert "generate-btn" not in html_text
+
         status, ctype, raw = _http_request(host, port, "GET", "/api/scenarios")
         assert status == 200
         assert "application/json" in ctype
         payload = json.loads(raw.decode("utf-8"))
         scenario_ids = [item["scenario_id"] for item in payload["scenarios"]]
-        assert "SC-01" in scenario_ids
-        assert "SC-02" in scenario_ids
-        assert "SC-04b" in scenario_ids
+        assert scenario_ids == ["CASE-01", "CASE-02", "CASE-03", "CASE-04"]
 
     def test_tp05_trace_and_compare_endpoints(
         self, live_server: tuple[str, int]
     ) -> None:
-        """TP-05: POST /api/trace e POST /api/compare retornam JSON válido para SC-02."""
+        """TP-05: POST /api/trace e POST /api/compare retornam JSON válido para CASE-02."""
         host, port = live_server
         body = json.dumps(
             {
                 "algorithm_key": "adapted_dp",
-                "is_presorted": False,
                 "shift_config": {"closing_horizon": 1080, "shift_window": None},
                 "surgeries": [
                     {
@@ -270,64 +260,30 @@ class TestHttpServerAndCliHappyPath:
         trace_data = json.loads(raw_trace.decode("utf-8"))
         assert trace_data["final_result"]["selected_ids"] == ["S2", "S3"]
         assert "PREDECESSORS" in trace_data["phase_offsets"]
+        assert trace_data["complexity_summary"]["time_complexity"] == "O(n log n)"
 
         status_cmp, _, raw_cmp = _http_request(host, port, "POST", "/api/compare", body)
         assert status_cmp == 200
         cmp_data = json.loads(raw_cmp.decode("utf-8"))
-        assert len(cmp_data["entries"]) == 5
+        assert len(cmp_data["entries"]) == 4
 
-    def test_tp06_generate_and_benchmark_endpoints(
-        self, live_server: tuple[str, int]
-    ) -> None:
-        """TP-06: POST /api/generate e POST /api/benchmark executam com dados válidos."""
-        host, port = live_server
-
-        gen_body = json.dumps(
-            {"n": 8, "seed": 99, "contaminated_ratio": 0.5, "horizon": 1080}
-        ).encode("utf-8")
-        status_gen, _, raw_gen = _http_request(
-            host, port, "POST", "/api/generate", gen_body
-        )
-        assert status_gen == 200
-        gen_data = json.loads(raw_gen.decode("utf-8"))
-        assert len(gen_data["surgeries"]) == 8
-
-        bench_body = json.dumps(
-            {
-                "sizes": [50, 100],
-                "repetitions": 2,
-                "seed": 42,
-                "is_presorted": False,
-                "include_naive": False,
-                "shift_config": {"closing_horizon": 1080, "shift_window": None},
-            }
-        ).encode("utf-8")
-        status_bench, _, raw_bench = _http_request(
-            host, port, "POST", "/api/benchmark", bench_body
-        )
-        assert status_bench == 200
-        bench_data = json.loads(raw_bench.decode("utf-8"))
-        assert len(bench_data["points"]) == 8  # 2 tamanhos * 4 escalonadores
-        assert "Algorithm" in bench_data["table"]
-
-    def test_tp07_cli_headless_modes(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """TP-07: src/main.py executa --scenario e --benchmark em modo headless."""
-        rc_sc = cli_main(["--scenario", "SC-02"])
+    def test_tp06_cli_headless_modes(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """TP-06: src/main.py executa --scenario e --algorithm em modo headless."""
+        rc_sc = cli_main(["--scenario", "CASE-02"])
         assert rc_sc == 0
         out_sc = capsys.readouterr().out
-        assert "SC-02" in out_sc
+        assert "Impacto da Esterilização" in out_sc
         assert "Adapted Greedy" in out_sc
 
-        rc_bench = cli_main(
-            ["--benchmark", "--sizes", "50", "100", "--repetitions", "2"]
-        )
-        assert rc_bench == 0
-        out_bench = capsys.readouterr().out
-        assert "Adapted Dynamic Programming" in out_bench
+        rc_single = cli_main(["--scenario", "CASE-02", "--algorithm", "adapted_dp"])
+        assert rc_single == 0
+        out_single = capsys.readouterr().out
+        assert "Adapted Dynamic Programming" in out_single
+        assert "Classic Greedy" not in out_single
 
         # Valida invocação como módulo via subprocesso
         proc = subprocess.run(
-            [sys.executable, "-m", "src.main", "--scenario", "SC-02"],
+            [sys.executable, "-m", "src.main", "--scenario", "CASE-02"],
             capture_output=True,
             text=True,
             check=False,
@@ -337,18 +293,24 @@ class TestHttpServerAndCliHappyPath:
 
 
 class TestUiSecurityAndEdgeCases:
-    """Casos de borda do tracer, limites de API e proteção contra XSS/path traversal."""
+    """Casos de borda do tracer, remoção de rotas e proteção contra XSS/path traversal."""
 
     def test_te01_empty_and_all_infeasible_traces(self) -> None:
-        """TE-01: Entradas vazia e totalmente inviável (SC-05a) geram traço limpo."""
-        sc05a = get_scenario_by_id("SC-05a")
+        """TE-01: Entradas vazia e totalmente inviável geram traço limpo."""
+        cfg = ShiftConfig(
+            closing_horizon=1080,
+            shift_window=ShiftWindow(start=720, end=780),
+        )
+        all_infeasible = [
+            SurgeryRequest("I1", start_time=700, finish_time=740),
+            SurgeryRequest("I2", start_time=720, finish_time=760),
+            SurgeryRequest("I3", start_time=1020, finish_time=1090),
+        ]
         for key in ALGORITHM_KEYS:
-            empty_trace = trace_scheduler_execution([], sc05a.shift_config, algorithm_key=key)
+            empty_trace = trace_scheduler_execution([], cfg, algorithm_key=key)
             assert empty_trace.steps[-1].selected_ids == ()
 
-            inf_trace = trace_scheduler_execution(
-                sc05a.surgeries, sc05a.shift_config, algorithm_key=key
-            )
+            inf_trace = trace_scheduler_execution(all_infeasible, cfg, algorithm_key=key)
             assert inf_trace.steps[-1].phase == TracePhase.RESULT
             if key in ("classic_greedy", "classic_dp"):
                 assert inf_trace.final_result.discarded_infeasible_count == 0
@@ -356,26 +318,21 @@ class TestUiSecurityAndEdgeCases:
                 assert inf_trace.final_result.total_selected == 0
                 assert inf_trace.final_result.discarded_infeasible_count == 3
 
-    def test_te02_presorted_validation_errors_match_production(self) -> None:
-        """TE-02: Tracer rejeita sequência fora de ordem ou presorted_start_indices inválido."""
-        unsorted = [
-            SurgeryRequest("B", start_time=20, finish_time=40),
-            SurgeryRequest("A", start_time=10, finish_time=30),
-        ]
-        for key in ALGORITHM_KEYS:
-            with pytest.raises(InvalidSchedulingInputError):
-                trace_scheduler_execution(
-                    unsorted, algorithm_key=key, is_presorted=True
-                )
+    def test_te02_removed_routes_return_404_and_invalid_algo_returns_400(
+        self, live_server: tuple[str, int]
+    ) -> None:
+        """TE-02: Rotas removidas (/api/generate, /api/benchmark) retornam 404; algoritmo inválido 400."""
+        host, port = live_server
 
-        with pytest.raises(InvalidSchedulingInputError):
-            trace_scheduler_execution(
-                [unsorted[1], unsorted[0]],
-                ShiftConfig(closing_horizon=35),
-                algorithm_key="adapted_dp",
-                is_presorted=True,
-                presorted_start_indices=[0, 1],
-            )
+        st_gen, _, _ = _http_request(host, port, "POST", "/api/generate", b"{}")
+        assert st_gen == 404
+
+        st_bench, _, _ = _http_request(host, port, "POST", "/api/benchmark", b"{}")
+        assert st_bench == 404
+
+        bad_algo = json.dumps({"algorithm_key": "naive_reduction", "surgeries": []}).encode("utf-8")
+        st_algo, _, _ = _http_request(host, port, "POST", "/api/trace", bad_algo)
+        assert st_algo == 400
 
     def test_te03_and_te04_http_validation_and_dos_caps(
         self, live_server: tuple[str, int]
@@ -383,13 +340,11 @@ class TestUiSecurityAndEdgeCases:
         """TE-03 e TE-04: Rejeita JSON malformado, erros de domínio, 413 e limites de DoS."""
         host, port = live_server
 
-        # JSON malformado -> 400
         st_bad_json, _, _ = _http_request(
             host, port, "POST", "/api/trace", b"{bad-json"
         )
         assert st_bad_json == 400
 
-        # Erro de domínio (s_i >= f_i) -> 400
         bad_domain = json.dumps(
             {
                 "surgeries": [
@@ -402,12 +357,10 @@ class TestUiSecurityAndEdgeCases:
         )
         assert st_bad_dom == 400
 
-        # Payload acima de MAX_REQUEST_BODY_BYTES -> 413
         huge_body = b"{" + b" " * (MAX_REQUEST_BODY_BYTES + 32) + b"}"
         st_413, _, _ = _http_request(host, port, "POST", "/api/trace", huge_body)
         assert st_413 == 413
 
-        # Limite trace n > 200 -> 400
         too_many_trace = json.dumps(
             {
                 "surgeries": [
@@ -425,23 +378,22 @@ class TestUiSecurityAndEdgeCases:
         )
         assert st_trace_cap == 400
 
-        # Limite generate n > 5000 -> 400
-        over_gen = json.dumps({"n": MAX_GENERATE_SIZE + 1}).encode("utf-8")
-        st_gen_cap, _, _ = _http_request(host, port, "POST", "/api/generate", over_gen)
-        assert st_gen_cap == 400
-
-        # Limite benchmark size > 10000 e repetitions > 20 -> 400
-        over_bench_n = json.dumps(
-            {"sizes": [MAX_BENCHMARK_SIZE + 1], "repetitions": 1}
+        too_many_compare = json.dumps(
+            {
+                "surgeries": [
+                    {
+                        "surgery_id": f"C{i}",
+                        "start_time": i,
+                        "finish_time": i + 5,
+                    }
+                    for i in range(MAX_COMPARE_INPUT_SIZE + 1)
+                ]
+            }
         ).encode("utf-8")
-        st_bn, _, _ = _http_request(host, port, "POST", "/api/benchmark", over_bench_n)
-        assert st_bn == 400
-
-        over_bench_r = json.dumps(
-            {"sizes": [10], "repetitions": MAX_BENCHMARK_REPETITIONS + 1}
-        ).encode("utf-8")
-        st_br, _, _ = _http_request(host, port, "POST", "/api/benchmark", over_bench_r)
-        assert st_br == 400
+        st_cmp_cap, _, _ = _http_request(
+            host, port, "POST", "/api/compare", too_many_compare
+        )
+        assert st_cmp_cap == 400
 
     def test_te05_path_traversal_and_unknown_routes_blocked(
         self, live_server: tuple[str, int]
