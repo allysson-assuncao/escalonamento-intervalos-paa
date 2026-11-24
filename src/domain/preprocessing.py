@@ -1,4 +1,4 @@
-"""Pré-processamento de viabilidade ativa, liberação efetiva e redução ingênua."""
+"""Pré-processamento de viabilidade ativa e cálculo da liberação efetiva r_i."""
 
 from collections.abc import Sequence
 
@@ -118,51 +118,3 @@ def preprocess_feasible_surgeries(
     """Valida entradas, filtra cirurgias viáveis e calcula r_i em O(n)."""
     items = validate_scheduler_inputs(surgeries, shift_config)
     return preprocess_validated_surgeries(items, shift_config)
-
-
-def _is_naive_interval_feasible(
-    surgery: SurgeryRequest,
-    naive_finish: int,
-    shift_config: ShiftConfig | None,
-) -> bool:
-    """Verifica viabilidade ingênua tratando [s_i, f_i + c_i] como intervalo ativo."""
-    if shift_config is None:
-        return True
-    if naive_finish > shift_config.closing_horizon:
-        return False
-    window = shift_config.shift_window
-    if window is not None:
-        return naive_finish <= window.start or surgery.start_time >= window.end
-    return True
-
-
-def preprocess_naive_validated_surgeries(
-    items: Sequence[SurgeryRequest],
-    shift_config: ShiftConfig | None = None,
-) -> tuple[list[ProcessedSurgery], int]:
-    """Aplica redução estática ingênua f'_i = f_i + c_i em sequência já validada."""
-    feasible: list[ProcessedSurgery] = []
-    discarded_count = 0
-
-    for surgery in items:
-        naive_finish = surgery.finish_time + surgery.sterilization_duration
-        if _is_naive_interval_feasible(surgery, naive_finish, shift_config):
-            feasible.append(
-                ProcessedSurgery(
-                    request=surgery,
-                    effective_release_time=naive_finish,
-                )
-            )
-        else:
-            discarded_count += 1
-
-    return feasible, discarded_count
-
-
-def preprocess_naive_static_reduction(
-    surgeries: Sequence[SurgeryRequest],
-    shift_config: ShiftConfig | None = None,
-) -> tuple[list[ProcessedSurgery], int]:
-    """Aplica redução estática ingênua f'_i = f_i + c_i contra H e [A, B] em O(n)."""
-    items = validate_scheduler_inputs(surgeries, shift_config)
-    return preprocess_naive_validated_surgeries(items, shift_config)

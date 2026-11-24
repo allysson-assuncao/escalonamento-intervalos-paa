@@ -24,10 +24,8 @@ class ClassicGreedyScheduler:
         self,
         surgeries: Sequence[SurgeryRequest],
         shift_config: ShiftConfig | None = None,
-        *,
-        is_presorted: bool = False,
     ) -> SchedulingResult:
-        """Seleciona o maior subconjunto compatível priorizando menor término f_i."""
+        """Seleciona o maior subconjunto compatível priorizando menor término f_i em O(n log n)."""
         # Valida e copia a entrada para preservar imutabilidade da coleção do chamador
         items = validate_scheduler_inputs(surgeries, shift_config)
 
@@ -36,7 +34,6 @@ class ClassicGreedyScheduler:
         ordered = order_surgeries_by_key(
             items,
             key_fn=lambda item: (item.finish_time, item.start_time),
-            is_presorted=is_presorted,
         )
 
         selected: list[ProcessedSurgery] = []

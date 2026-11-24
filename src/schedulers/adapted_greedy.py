@@ -26,15 +26,13 @@ class AdaptedGreedyScheduler:
         self,
         surgeries: Sequence[SurgeryRequest],
         shift_config: ShiftConfig | None = None,
-        *,
-        is_presorted: bool = False,
     ) -> SchedulingResult:
-        """Seleciona subconjunto ótimo priorizando menor instante de liberação efetiva r_i."""
+        """Seleciona subconjunto ótimo em O(n log n) priorizando menor liberação efetiva r_i."""
         items = validate_scheduler_inputs(surgeries, shift_config)
 
         start_ns = time.perf_counter_ns()
         feasible, discarded_count = preprocess_validated_surgeries(items, shift_config)
-        ordered = order_processed_surgeries(feasible, is_presorted=is_presorted)
+        ordered = order_processed_surgeries(feasible)
         selected = select_greedy_processed_surgeries(ordered)
 
         elapsed_ns = time.perf_counter_ns() - start_ns

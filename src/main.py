@@ -5,11 +5,12 @@ from collections.abc import Sequence
 import sys
 import webbrowser
 
-from src.benchmark.runner import format_benchmark_table, run_scaling_benchmark
 from src.domain.exceptions import InvalidSchedulingInputError
 from src.ui.scenarios_catalog import get_scenario_by_id
 from src.ui.server import DEFAULT_HOST, DEFAULT_PORT, create_http_server
-from src.ui.tracer import run_comparative_arena
+from src.ui.tracer import ALGORITHM_KEYS, run_comparative_arena
+
+_CLI_ALGORITHM_CHOICES: tuple[str, ...] = ("all", *ALGORITHM_KEYS)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -17,8 +18,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="escalonamento-intervalos-paa",
         description=(
-            "Simulador interativo, comparador e benchmark empírico para "
-            "escalonamento cirúrgico com esterilização assimétrica e janela de turno."
+            "Simulador didático passo a passo e comparador para escalonamento "
+            "cirúrgico com esterilização assimétrica e janela de troca de plantão."
         ),
     )
     parser.add_argument(
@@ -41,48 +42,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--scenario",
         type=str,
         default=None,
-        help="Executa comparação em modo CLI para um cenário (ex: SC-02) e encerra.",
+        help="Executa comparação em modo CLI para um cenário (ex: CASE-02) e encerra.",
     )
     parser.add_argument(
-        "--benchmark",
-        action="store_true",
-        help="Executa benchmark empírico de escalabilidade no terminal e encerra.",
-    )
-    parser.add_argument(
-        "--sizes",
-        type=int,
-        nargs="+",
-        default=[100, 500, 1000, 2500],
-        help="Tamanhos de entrada n usados com --benchmark.",
-    )
-    parser.add_argument(
-        "--repetitions",
-        type=int,
-        default=3,
-        help="Número de repetições por tamanho no modo --benchmark.",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Semente determinística para geração sintética no modo --benchmark.",
-    )
-    parser.add_argument(
-        "--presorted",
-        action="store_true",
-        help="Usa modo pré-ordenado O(n) nas execuções CLI.",
+        "--algorithm",
+        type=str,
+        choices=_CLI_ALGORITHM_CHOICES,
+        default="all",
+        help="Seleciona qual algoritmo exibir junto com --scenario (padrão: all).",
     )
     return parser
 
 
-def _run_scenario_cli(scenario_id: str, *, is_presorted: bool) -> int:
-    """Executa comparação dos 5 algoritmos sobre um cenário e imprime resumo."""
+def _run_scenario_cli(scenario_id: str, *, algorithm: str = "all") -> int:
+    """Executa comparação dos algoritmos sobre um cenário padrão e imprime o resumo."""
     preset = get_scenario_by_id(scenario_id)
-    entries = run_comparative_arena(
-        preset.surgeries,
-        preset.shift_config,
-        is_presorted=is_presorted,
-    )
+    entries = run_comparative_arena(preset.surgeries, preset.shift_config)
+    if algorithm != "all":
+        entries = [entry for entry in entries if entry.algorithm_key == algorithm]
+
     print(f"=== {preset.title} ===")
     print(preset.description)
     print()
@@ -98,46 +76,21 @@ def _run_scenario_cli(scenario_id: str, *, is_presorted: bool) -> int:
         print(
             f"- {entry.algorithm_name}: selecionadas={entry.result.total_selected}, "
             f"descartadas={entry.result.discarded_infeasible_count}, "
-            f"agenda=[{selected_ids}], tempo={entry.result.elapsed_ns}ns, status={status}"
+            f"agenda=[{selected_ids}], status={status}"
         )
         for conflict in entry.physical_conflicts:
             print(f"    * {conflict}")
     return 0
 
 
-def _run_benchmark_cli(
-    sizes: Sequence[int],
-    *,
-    repetitions: int,
-    seed: int,
-    is_presorted: bool,
-) -> int:
-    """Executa benchmark de escalabilidade no terminal e imprime tabela formatada."""
-    points = run_scaling_benchmark(
-        sizes,
-        repetitions=repetitions,
-        seed=seed,
-        is_presorted=is_presorted,
-    )
-    print(format_benchmark_table(points))
-    return 0
-
-
 def main(argv: Sequence[str] | None = None) -> int:
-    """Ponto de entrada principal suportando modos CLI e interface Web local."""
+    """Ponto de entrada principal suportando execução CLI e interface Web local."""
     parser = build_arg_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     try:
         if args.scenario is not None:
-            return _run_scenario_cli(args.scenario, is_presorted=args.presorted)
-        if args.benchmark:
-            return _run_benchmark_cli(
-                args.sizes,
-                repetitions=args.repetitions,
-                seed=args.seed,
-                is_presorted=args.presorted,
-            )
+            return _run_scenario_cli(args.scenario, algorithm=args.algorithm)
 
         server = create_http_server(host=args.host, port=args.port)
     except InvalidSchedulingInputError as exc:

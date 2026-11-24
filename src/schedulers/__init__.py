@@ -8,7 +8,6 @@ from src.schedulers.brute_force_oracle import (
 )
 from src.schedulers.classic_dp import ClassicDPScheduler
 from src.schedulers.classic_greedy import ClassicGreedyScheduler
-from src.schedulers.naive_reduction import NaiveReductionScheduler
 from src.schedulers.protocol import IntervalSchedulerProtocol
 
 __all__ = [
@@ -19,5 +18,4 @@ __all__ = [
     "ClassicGreedyScheduler",
     "IntervalSchedulerProtocol",
     "MAX_ORACLE_INPUT_SIZE",
-    "NaiveReductionScheduler",
 ]

@@ -31,8 +31,6 @@ class BruteForceOracleScheduler:
         self,
         surgeries: Sequence[SurgeryRequest],
         shift_config: ShiftConfig | None = None,
-        *,
-        is_presorted: bool = False,
     ) -> SchedulingResult:
         """Enumera subconjuntos viáveis com poda para certificar a otimalidade global."""
         items = validate_scheduler_inputs(surgeries, shift_config)
@@ -43,7 +41,7 @@ class BruteForceOracleScheduler:
 
         start_ns = time.perf_counter_ns()
         feasible, discarded_count = preprocess_validated_surgeries(items, shift_config)
-        ordered = order_processed_surgeries(feasible, is_presorted=is_presorted)
+        ordered = order_processed_surgeries(feasible)
         selected = _search_exact_optimum(ordered)
 
         elapsed_ns = time.perf_counter_ns() - start_ns
