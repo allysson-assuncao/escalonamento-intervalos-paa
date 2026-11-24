@@ -1,4 +1,4 @@
-/* Motor interativo do simulador, arena comparativa e gráficos SVG sem dependências */
+/* Motor interativo do simulador passo a passo e comparativo dos 4 algoritmos (SVG sem dependências) */
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -9,14 +9,6 @@ const PHASE_LABELS = {
   SELECTION_OR_DP: "Seleção / DP",
   BACKTRACKING: "Backtracking",
   RESULT: "Resultado",
-};
-
-const SERIES_COLORS = {
-  "Classic Greedy (Earliest Finish Time)": "#64748b",
-  "Classic Dynamic Programming": "#0284c7",
-  "Naive Static Reduction (f'_i = f_i + c_i)": "#dc2626",
-  "Adapted Greedy (Earliest Effective Release)": "#16a34a",
-  "Adapted Dynamic Programming": "#7c3aed",
 };
 
 const appState = {
@@ -223,17 +215,17 @@ function loadPresetById(scenarioId) {
   renderSurgeriesEditorTable();
 }
 
-function buildGanttSvg(items, shiftConfig, statuses = {}, activeId = null, lastRelease = null) {
-  const width = 900;
-  const margin = { top: 28, right: 30, bottom: 26, left: 110 };
-  const rowHeight = 28;
-  const height = Math.max(120, margin.top + margin.bottom + Math.max(1, items.length) * rowHeight);
-
+function computeGanttDomain(items, shiftConfig) {
   let minT = Infinity;
   let maxT = -Infinity;
   for (const item of items) {
     minT = Math.min(minT, item.start_time);
-    maxT = Math.max(maxT, item.finish_time + item.sterilization_duration, item.effective_release_time);
+    const sterilEnd = item.finish_time + (item.sterilization_duration || 0);
+    const rel =
+      typeof item.effective_release_time === "number"
+        ? item.effective_release_time
+        : sterilEnd;
+    maxT = Math.max(maxT, sterilEnd, rel);
   }
   if (shiftConfig) {
     maxT = Math.max(maxT, shiftConfig.closing_horizon);
@@ -246,9 +238,26 @@ function buildGanttSvg(items, shiftConfig, statuses = {}, activeId = null, lastR
     minT = 480;
     maxT = 1080;
   }
-  const pad = Math.max(30, Math.round((maxT - minT) * 0.08));
-  const domainStart = Math.max(0, minT - pad);
-  const domainEnd = maxT + pad;
+  return { minT, maxT };
+}
+
+function buildGanttSvg(
+  items,
+  shiftConfig,
+  statuses = {},
+  activeId = null,
+  lastRelease = null,
+  sharedDomain = null
+) {
+  const width = 900;
+  const margin = { top: 28, right: 30, bottom: 26, left: 110 };
+  const rowHeight = 28;
+  const height = Math.max(120, margin.top + margin.bottom + Math.max(1, items.length) * rowHeight);
+
+  const domain = sharedDomain || computeGanttDomain(items, shiftConfig);
+  const pad = Math.max(30, Math.round((domain.maxT - domain.minT) * 0.08));
+  const domainStart = Math.max(0, domain.minT - pad);
+  const domainEnd = domain.maxT + pad;
   const plotWidth = width - margin.left - margin.right;
 
   const scaleX = (t) => margin.left + ((t - domainStart) / Math.max(1, domainEnd - domainStart)) * plotWidth;
@@ -444,6 +453,34 @@ function buildGanttSvg(items, shiftConfig, statuses = {}, activeId = null, lastR
   return svg;
 }
 
+function renderComplexitySummary(summary) {
+  if (!summary) return;
+  document.getElementById("summary-time-badge").textContent = `Tempo: ${summary.time_complexity}`;
+  document.getElementById("summary-space-badge").textContent = `Espaço: ${summary.space_complexity}`;
+  document.getElementById("summary-sizes-badge").textContent =
+    `n=${summary.input_n} | viáveis=${summary.feasible_n}`;
+  document.getElementById("summary-sorting-formula").textContent = summary.sorting_key_formula;
+  document.getElementById("summary-decision-formula").textContent = summary.decision_rule_formula;
+
+  const tbody = document.getElementById("summary-phases-tbody");
+  tbody.replaceChildren();
+  for (const row of summary.phases || []) {
+    const tr = document.createElement("tr");
+
+    const tdPhase = document.createElement("td");
+    tdPhase.textContent = row.phase;
+    const tdComp = document.createElement("td");
+    tdComp.textContent = row.complexity;
+    const tdOps = document.createElement("td");
+    tdOps.textContent = String(row.operations);
+    const tdDesc = document.createElement("td");
+    tdDesc.textContent = row.description;
+
+    tr.append(tdPhase, tdComp, tdOps, tdDesc);
+    tbody.appendChild(tr);
+  }
+}
+
 function renderPhaseJumps(trace, currentPhase) {
   const bar = document.getElementById("phase-jumps-bar");
   bar.replaceChildren();
@@ -596,7 +633,7 @@ function renderCurrentStep() {
       trace.shift_config,
       step.statuses,
       step.active_surgery_id,
-      typeof step.variables.last_release === "number" ? step.variables.last_release : null
+      typeof step.last_release_minutes === "number" ? step.last_release_minutes : null
     )
   );
 
@@ -648,9 +685,9 @@ async function runTraceSimulation() {
       surgeries: appState.surgeries,
       shift_config: appState.shiftConfig,
       algorithm_key: document.getElementById("algo-select").value,
-      is_presorted: document.getElementById("presorted-checkbox").checked,
     });
     appState.trace = trace;
+    renderComplexitySummary(trace.complexity_summary);
     const slider = document.getElementById("step-slider");
     slider.max = String(Math.max(0, trace.steps.length - 1));
     goToStep(0);
@@ -666,7 +703,6 @@ async function runComparisonArena() {
     const data = await postJson("/api/compare", {
       surgeries: appState.surgeries,
       shift_config: appState.shiftConfig,
-      is_presorted: document.getElementById("presorted-checkbox").checked,
     });
 
     const tbody = document.getElementById("compare-summary-tbody");
@@ -674,19 +710,25 @@ async function runComparisonArena() {
     const ganttList = document.getElementById("compare-gantt-list");
     ganttList.replaceChildren();
 
+    const sharedItems = [...appState.surgeries];
+    for (const entry of data.entries) {
+      sharedItems.push(...entry.selected_surgeries);
+    }
+    const sharedDomain = computeGanttDomain(sharedItems, appState.shiftConfig);
+
     for (const entry of data.entries) {
       const tr = document.createElement("tr");
 
       const tdName = document.createElement("td");
       tdName.textContent = entry.algorithm_name;
+      const tdComp = document.createElement("td");
+      tdComp.textContent = "O(n log n)";
       const tdSel = document.createElement("td");
       tdSel.textContent = String(entry.total_selected);
       const tdDisc = document.createElement("td");
       tdDisc.textContent = String(entry.discarded_infeasible_count);
       const tdIds = document.createElement("td");
       tdIds.textContent = entry.selected_ids.join(", ") || "—";
-      const tdNs = document.createElement("td");
-      tdNs.textContent = String(entry.elapsed_ns);
 
       const tdStatus = document.createElement("td");
       const badge = document.createElement("span");
@@ -702,7 +744,7 @@ async function runComparisonArena() {
         tdStatus.appendChild(ul);
       }
 
-      tr.append(tdName, tdSel, tdDisc, tdIds, tdNs, tdStatus);
+      tr.append(tdName, tdComp, tdSel, tdDisc, tdIds, tdStatus);
       tbody.appendChild(tr);
 
       const card = document.createElement("div");
@@ -715,137 +757,18 @@ async function runComparisonArena() {
       for (const sid of entry.selected_ids) {
         statusMap[sid] = "SELECTED";
       }
-      card.appendChild(buildGanttSvg(entry.selected_surgeries, appState.shiftConfig, statusMap));
+      card.appendChild(
+        buildGanttSvg(
+          entry.selected_surgeries,
+          appState.shiftConfig,
+          statusMap,
+          null,
+          null,
+          sharedDomain
+        )
+      );
       ganttList.appendChild(card);
     }
-  } catch (err) {
-    showError(err.message);
-  }
-}
-
-function buildLineChartSvg(points, valueKey, yLabel) {
-  const width = 560;
-  const height = 280;
-  const margin = { top: 24, right: 20, bottom: 58, left: 60 };
-  const plotW = width - margin.left - margin.right;
-  const plotH = height - margin.top - margin.bottom;
-
-  const sizes = [...new Set(points.map((p) => p.input_size))].sort((a, b) => a - b);
-  const algos = [...new Set(points.map((p) => p.algorithm_name))];
-
-  const minX = Math.min(...sizes);
-  const maxX = Math.max(...sizes, minX + 1);
-  const maxY = Math.max(0.0001, ...points.map((p) => Number(p[valueKey]) || 0));
-
-  const scaleX = (x) => margin.left + ((x - minX) / Math.max(1, maxX - minX)) * plotW;
-  const scaleY = (y) => margin.top + plotH - (y / maxY) * plotH;
-
-  const svg = createSvgElement("svg", {
-    viewBox: `0 0 ${width} ${height}`,
-    width: "100%",
-    style: "display: block; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px;",
-  });
-
-  // Eixos
-  svg.appendChild(createSvgElement("line", {
-    x1: margin.left, y1: margin.top, x2: margin.left, y2: margin.top + plotH, stroke: "#475569",
-  }));
-  svg.appendChild(createSvgElement("line", {
-    x1: margin.left, y1: margin.top + plotH, x2: margin.left + plotW, y2: margin.top + plotH, stroke: "#475569",
-  }));
-
-  for (let i = 0; i <= 4; i += 1) {
-    const valY = (maxY * i) / 4;
-    const y = scaleY(valY);
-    svg.appendChild(createSvgElement("line", {
-      x1: margin.left, y1: y, x2: margin.left + plotW, y2: y, stroke: "#f1f5f9",
-    }));
-    const lbl = createSvgElement("text", {
-      x: margin.left - 6, y: y + 4, "text-anchor": "end", "font-size": "10", fill: "#64748b",
-    });
-    lbl.textContent = valY >= 100 ? valY.toFixed(0) : valY.toFixed(2);
-    svg.appendChild(lbl);
-  }
-
-  for (const s of sizes) {
-    const x = scaleX(s);
-    const lbl = createSvgElement("text", {
-      x, y: margin.top + plotH + 15, "text-anchor": "middle", "font-size": "10", fill: "#64748b",
-    });
-    lbl.textContent = String(s);
-    svg.appendChild(lbl);
-  }
-
-  const yTitle = createSvgElement("text", {
-    x: margin.left, y: 14, "font-size": "11", "font-weight": "700", fill: "#1e293b",
-  });
-  yTitle.textContent = yLabel;
-  svg.appendChild(yTitle);
-
-  algos.forEach((algo, idx) => {
-    const color = SERIES_COLORS[algo] || "#334155";
-    const seriesPoints = points
-      .filter((p) => p.algorithm_name === algo)
-      .sort((a, b) => a.input_size - b.input_size);
-
-    const coords = seriesPoints.map((p) => `${scaleX(p.input_size)},${scaleY(Number(p[valueKey]) || 0)}`).join(" ");
-    svg.appendChild(createSvgElement("polyline", {
-      fill: "none",
-      stroke: color,
-      "stroke-width": "2.4",
-      points: coords,
-    }));
-    for (const p of seriesPoints) {
-      svg.appendChild(createSvgElement("circle", {
-        cx: scaleX(p.input_size),
-        cy: scaleY(Number(p[valueKey]) || 0),
-        r: "3.5",
-        fill: color,
-      }));
-    }
-
-    const legX = margin.left + (idx % 2) * 245;
-    const legY = height - 24 + Math.floor(idx / 2) * 14;
-    svg.appendChild(createSvgElement("rect", { x: legX, y: legY - 8, width: "10", height: "10", fill: color }));
-    const legTxt = createSvgElement("text", { x: legX + 14, y: legY, "font-size": "10", fill: "#1e293b" });
-    legTxt.textContent = algo;
-    svg.appendChild(legTxt);
-  });
-
-  return svg;
-}
-
-async function runBenchmarkSuite() {
-  showError("");
-  try {
-    const rawSizes = document
-      .getElementById("bench-sizes")
-      .value.split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map(Number);
-
-    const isPresorted = document.getElementById("bench-presorted").checked;
-    const data = await postJson("/api/benchmark", {
-      sizes: rawSizes,
-      repetitions: Number(document.getElementById("bench-reps").value),
-      seed: Number(document.getElementById("bench-seed").value),
-      is_presorted: isPresorted,
-      include_naive: document.getElementById("bench-include-naive").checked,
-      shift_config: readShiftConfigFromDom(),
-    });
-
-    document.getElementById("benchmark-table-pre").textContent = data.table;
-    document.getElementById("chart-time-container").replaceChildren(
-      buildLineChartSvg(data.points, "median_elapsed_ms", "Mediana (ms)")
-    );
-    const ratioKey = isPresorted ? "ratio_n" : "ratio_n_log_n";
-    document.getElementById("chart-ratio-title").textContent = isPresorted
-      ? "Razão Normalizada T(n) / n (ns)"
-      : "Razão Normalizada T(n) / (n log2 n) (ns)";
-    document.getElementById("chart-ratio-container").replaceChildren(
-      buildLineChartSvg(data.points, ratioKey, isPresorted ? "T(n)/n (ns)" : "T(n)/(n log2 n) (ns)")
-    );
   } catch (err) {
     showError(err.message);
   }
@@ -879,8 +802,8 @@ async function initApp() {
       opt.textContent = preset.title;
       select.appendChild(opt);
     }
-    const defaultId = appState.presets.some((p) => p.scenario_id === "SC-02")
-      ? "SC-02"
+    const defaultId = appState.presets.some((p) => p.scenario_id === "CASE-02")
+      ? "CASE-02"
       : appState.presets[0]?.scenario_id;
     if (defaultId) {
       select.value = defaultId;
@@ -899,6 +822,11 @@ async function initApp() {
       document.getElementById(`tab-${btn.dataset.tab}`).classList.add("active");
       runActiveTabSimulation();
     });
+  });
+
+  document.getElementById("preset-select").addEventListener("change", (e) => {
+    loadPresetById(e.target.value);
+    runActiveTabSimulation();
   });
 
   document.getElementById("load-preset-btn").addEventListener("click", () => {
@@ -990,29 +918,9 @@ async function initApp() {
     }
   });
 
-  document.getElementById("generate-btn").addEventListener("click", async () => {
-    showError("");
-    try {
-      const cfg = readShiftConfigFromDom();
-      const data = await postJson("/api/generate", {
-        n: Number(document.getElementById("gen-n").value),
-        seed: Number(document.getElementById("gen-seed").value),
-        contaminated_ratio: Number(document.getElementById("gen-ratio").value),
-        horizon: cfg ? cfg.closing_horizon : 1080,
-      });
-      appState.surgeries = data.surgeries;
-      renderSurgeriesEditorTable();
-      runActiveTabSimulation();
-    } catch (err) {
-      showError(err.message);
-    }
-  });
-
   document.getElementById("apply-input-btn").addEventListener("click", runActiveTabSimulation);
   document.getElementById("algo-select").addEventListener("change", runTraceSimulation);
-  document.getElementById("presorted-checkbox").addEventListener("change", runActiveTabSimulation);
   document.getElementById("run-compare-btn").addEventListener("click", runComparisonArena);
-  document.getElementById("run-benchmark-btn").addEventListener("click", runBenchmarkSuite);
 
   document.getElementById("btn-first").addEventListener("click", () => { stopAutoPlay(); goToStep(0); });
   document.getElementById("btn-prev").addEventListener("click", () => { stopAutoPlay(); goToStep(appState.currentStepIndex - 1); });

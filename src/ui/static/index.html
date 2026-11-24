@@ -10,12 +10,11 @@
   <header class="app-header">
     <div class="header-title">
       <h1>Escalonamento de Intervalos em Sala Cirúrgica (PAA)</h1>
-      <p>Simulação passo a passo, análise de estruturas de dados e complexidade assintótica &Theta;(n log n) / &Theta;(n)</p>
+      <p>Simulação passo a passo, estruturas de dados e complexidade assintótica &Theta;(n log n)</p>
     </div>
     <nav class="tab-nav" aria-label="Modos de visualização">
       <button type="button" class="tab-btn active" data-tab="simulator">1. Simulador Passo a Passo</button>
-      <button type="button" class="tab-btn" data-tab="arena">2. Arena Comparativa</button>
-      <button type="button" class="tab-btn" data-tab="benchmark">3. Benchmark &amp; Complexidade</button>
+      <button type="button" class="tab-btn" data-tab="arena">2. Comparativo dos 4 Algoritmos</button>
     </nav>
   </header>
 
@@ -24,10 +23,10 @@
     <aside class="input-panel" aria-label="Configuração de entrada">
       <section class="card">
         <h2>Cenário de Entrada</h2>
-        <label class="field-label" for="preset-select">Preset Pré-configurado</label>
+        <label class="field-label" for="preset-select">Caso Padrão de Demonstração</label>
         <div class="row-gap">
           <select id="preset-select"></select>
-          <button type="button" id="load-preset-btn" class="btn btn-secondary">Carregar</button>
+          <button type="button" id="load-preset-btn" class="btn btn-secondary">Recarregar</button>
         </div>
         <p id="preset-description" class="muted-note"></p>
       </section>
@@ -65,7 +64,7 @@
 
       <section class="card">
         <div class="card-header-row">
-          <h2>Cirurgias (<span id="surgery-count-badge">0</span>)</h2>
+          <h2>Cirurgias do Caso (<span id="surgery-count-badge">0</span>)</h2>
           <button type="button" id="apply-input-btn" class="btn btn-primary">Executar</button>
         </div>
 
@@ -100,29 +99,10 @@
         </div>
       </section>
 
-      <section class="card">
-        <h2>Gerador Aleatório</h2>
-        <div class="form-grid-3">
-          <div>
-            <label class="field-label" for="gen-n">n</label>
-            <input type="number" id="gen-n" min="1" max="200" value="10" />
-          </div>
-          <div>
-            <label class="field-label" for="gen-seed">Seed</label>
-            <input type="number" id="gen-seed" value="42" />
-          </div>
-          <div>
-            <label class="field-label" for="gen-ratio">% Contam.</label>
-            <input type="number" id="gen-ratio" min="0" max="1" step="0.05" value="0.40" />
-          </div>
-        </div>
-        <button type="button" id="generate-btn" class="btn btn-secondary full-width">Gerar Instância</button>
-      </section>
-
       <div id="global-error-banner" class="error-banner hidden" role="alert"></div>
     </aside>
 
-    <!-- Conteúdo das 3 abas -->
+    <!-- Conteúdo das 2 abas -->
     <section class="content-area">
       <!-- ABA 1: SIMULADOR PASSO A PASSO -->
       <div class="tab-panel active" id="tab-simulator">
@@ -131,17 +111,12 @@
             <div>
               <label class="field-label" for="algo-select">Algoritmo Simulado</label>
               <select id="algo-select">
-                <option value="adapted_greedy">Guloso Adaptado (Earliest Effective Release)</option>
+                <option value="adapted_greedy">Guloso Adaptado (Menor Liberação Efetiva r_i)</option>
                 <option value="adapted_dp">Programação Dinâmica Adaptada</option>
                 <option value="classic_greedy">Guloso Clássico (Baseline)</option>
                 <option value="classic_dp">Programação Dinâmica Clássica (Baseline)</option>
-                <option value="naive_reduction">Redução Estática Ingênua (f' = f + c)</option>
               </select>
             </div>
-            <label class="checkbox-row inline-check">
-              <input type="checkbox" id="presorted-checkbox" />
-              <span>Entrada pré-ordenada (modo O(n))</span>
-            </label>
           </div>
 
           <div class="playback-bar">
@@ -168,6 +143,40 @@
           <div class="phase-jumps" id="phase-jumps-bar" aria-label="Saltos por fase"></div>
         </div>
 
+        <details open class="card complexity-card" id="complexity-summary-card">
+          <summary class="complexity-summary-header">
+            <span class="complexity-title">Resumo Matemático &amp; Complexidade por Fase</span>
+            <span class="complexity-badges">
+              <span class="metric-pill" id="summary-time-badge">Tempo: O(n log n)</span>
+              <span class="metric-pill" id="summary-space-badge">Espaço: O(n)</span>
+              <span class="metric-pill metric-pill-muted" id="summary-sizes-badge">n=0 | viáveis=0</span>
+            </span>
+          </summary>
+          <div class="formula-grid">
+            <div class="formula-box">
+              <div class="formula-label">Viabilidade, Liberação e Ordenação</div>
+              <div class="formula-code" id="summary-sorting-formula">—</div>
+            </div>
+            <div class="formula-box">
+              <div class="formula-label">Regra de Decisão / Recorrência</div>
+              <div class="formula-code" id="summary-decision-formula">—</div>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table" id="summary-phases-table">
+              <thead>
+                <tr>
+                  <th>Fase do Algoritmo</th>
+                  <th>Complexidade</th>
+                  <th>Operações na Instância</th>
+                  <th>Descrição</th>
+                </tr>
+              </thead>
+              <tbody id="summary-phases-tbody"></tbody>
+            </table>
+          </div>
+        </details>
+
         <div class="card step-narration-card">
           <div class="narration-header">
             <span id="step-phase-badge" class="phase-pill">FASE</span>
@@ -192,7 +201,7 @@
 
         <div class="inspector-split">
           <div class="card">
-            <h2>Variáveis em Tempo Real</h2>
+            <h2>Variáveis da Iteração Atual</h2>
             <div id="variables-grid" class="variables-grid"></div>
           </div>
 
@@ -203,11 +212,11 @@
         </div>
       </div>
 
-      <!-- ABA 2: ARENA COMPARATIVA -->
+      <!-- ABA 2: COMPARATIVO DOS 4 ALGORITMOS -->
       <div class="tab-panel" id="tab-arena">
         <div class="card">
           <div class="card-header-row">
-            <h2>Comparativo Lado a Lado (5 Abordagens)</h2>
+            <h2>Comparativo Lado a Lado dos 4 Algoritmos</h2>
             <button type="button" id="run-compare-btn" class="btn btn-primary">Atualizar Comparação</button>
           </div>
           <div class="table-scroll">
@@ -215,10 +224,10 @@
               <thead>
                 <tr>
                   <th>Algoritmo</th>
+                  <th>Complexidade</th>
                   <th>Selecionadas</th>
                   <th>Descartadas</th>
                   <th>Agenda Escolhida</th>
-                  <th>Tempo (ns)</th>
                   <th>Validação Física Real</th>
                 </tr>
               </thead>
@@ -228,56 +237,6 @@
         </div>
 
         <div id="compare-gantt-list" class="compare-gantt-list"></div>
-      </div>
-
-      <!-- ABA 3: BENCHMARK E COMPLEXIDADE -->
-      <div class="tab-panel" id="tab-benchmark">
-        <div class="card">
-          <div class="card-header-row">
-            <h2>Experimento Empírico de Complexidade Assintótica</h2>
-            <button type="button" id="run-benchmark-btn" class="btn btn-primary">Executar Benchmark</button>
-          </div>
-          <div class="bench-controls">
-            <div>
-              <label class="field-label" for="bench-sizes">Tamanhos n (separados por vírgula, máx 10000)</label>
-              <input type="text" id="bench-sizes" value="100, 500, 1000, 2500, 5000" />
-            </div>
-            <div>
-              <label class="field-label" for="bench-reps">Repetições (1..20)</label>
-              <input type="number" id="bench-reps" min="1" max="20" value="3" />
-            </div>
-            <div>
-              <label class="field-label" for="bench-seed">Seed</label>
-              <input type="number" id="bench-seed" value="42" />
-            </div>
-            <div class="bench-checks">
-              <label class="checkbox-row">
-                <input type="checkbox" id="bench-presorted" />
-                <span>Modo pré-ordenado &Theta;(n)</span>
-              </label>
-              <label class="checkbox-row">
-                <input type="checkbox" id="bench-include-naive" />
-                <span>Incluir Redução Ingênua</span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div class="charts-grid">
-          <div class="card">
-            <h3>Tempo Mediano T(n) em ms</h3>
-            <div id="chart-time-container" class="svg-wrapper"></div>
-          </div>
-          <div class="card">
-            <h3 id="chart-ratio-title">Razão Normalizada T(n) / (n log2 n)</h3>
-            <div id="chart-ratio-container" class="svg-wrapper"></div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h3>Tabela Consolidada de Métricas</h3>
-          <pre id="benchmark-table-pre" class="mono-pre">Clique em "Executar Benchmark" para gerar as medições empíricas.</pre>
-        </div>
       </div>
     </section>
   </main>

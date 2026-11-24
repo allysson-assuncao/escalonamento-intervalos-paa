@@ -1,4 +1,4 @@
-"""Rastreador passo a passo desacoplado e comparador lado a lado dos algoritmos."""
+"""Rastreador passo a passo desacoplado e comparador lado a lado dos 4 algoritmos."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -14,7 +14,6 @@ from src.domain.models import (
 from src.domain.preprocessing import (
     compute_effective_release_time,
     is_actively_feasible,
-    preprocess_naive_static_reduction,
     validate_scheduler_inputs,
 )
 from src.schedulers import (
@@ -23,9 +22,7 @@ from src.schedulers import (
     ClassicDPScheduler,
     ClassicGreedyScheduler,
     IntervalSchedulerProtocol,
-    NaiveReductionScheduler,
 )
-from src.schedulers.protocol import validate_presorted_start_indices
 from src.ui.scenarios_catalog import ScenarioPreset
 
 MAX_TRACE_INPUT_SIZE: int = 200
@@ -33,7 +30,6 @@ MAX_TRACE_INPUT_SIZE: int = 200
 ALGORITHM_KEYS: tuple[str, ...] = (
     "classic_greedy",
     "classic_dp",
-    "naive_reduction",
     "adapted_greedy",
     "adapted_dp",
 )
@@ -80,6 +76,7 @@ class SimulationStep:
     binary_search_range: tuple[int, int, int] | None = None
     active_dp_index: int | None = None
     referenced_dp_index: int | None = None
+    last_release_minutes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -88,13 +85,13 @@ class SimulationTrace:
 
     algorithm_key: str
     algorithm_name: str
-    is_presorted: bool
     input_surgeries: tuple[SurgeryRequest, ...]
     processed_surgeries: tuple[ProcessedSurgery, ...]
     shift_config: ShiftConfig | None
     final_result: SchedulingResult
     steps: tuple[SimulationStep, ...]
     phase_offsets: dict[str, int]
+    complexity_summary: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -114,12 +111,16 @@ def format_minutes_hhmm(minutes: int) -> str:
     return f"{hours:02d}:{mins:02d}"
 
 
+def format_hhmm_with_min(minutes: int) -> str:
+    """Formata um timestamp em minutos no formato didático 'HH:MM (min)'."""
+    return f"{format_minutes_hhmm(minutes)} ({minutes} min)"
+
+
 def _resolve_scheduler(algorithm_key: str) -> IntervalSchedulerProtocol:
     """Resolve a instância do escalonador a partir de sua chave textual."""
     mapping: dict[str, IntervalSchedulerProtocol] = {
         "classic_greedy": ClassicGreedyScheduler(),
         "classic_dp": ClassicDPScheduler(),
-        "naive_reduction": NaiveReductionScheduler(),
         "adapted_greedy": AdaptedGreedyScheduler(),
         "adapted_dp": AdaptedDPScheduler(),
     }
@@ -130,42 +131,6 @@ def _resolve_scheduler(algorithm_key: str) -> IntervalSchedulerProtocol:
             f"Algoritmo '{algorithm_key}' inválido. Opções suportadas: {valid}."
         )
     return scheduler
-
-
-def _run_production_scheduler(
-    scheduler: IntervalSchedulerProtocol,
-    algorithm_key: str,
-    items: list[SurgeryRequest],
-    shift_config: ShiftConfig | None,
-    *,
-    is_presorted: bool,
-    presorted_start_indices: Sequence[int] | None,
-) -> SchedulingResult:
-    """Executa o escalonador oficial de produção garantindo validação idêntica."""
-    if isinstance(scheduler, (ClassicDPScheduler, AdaptedDPScheduler)):
-        return scheduler.schedule(
-            items,
-            shift_config=shift_config,
-            is_presorted=is_presorted,
-            presorted_start_indices=presorted_start_indices,
-        )
-    if presorted_start_indices is not None:
-        raise InvalidSchedulingInputError(
-            f"presorted_start_indices não é suportado por '{algorithm_key}'."
-        )
-    return scheduler.schedule(
-        items,
-        shift_config=shift_config,
-        is_presorted=is_presorted,
-    )
-
-
-def _are_processed_starts_monotonic(ordered: Sequence[ProcessedSurgery]) -> bool:
-    """Verifica em O(n) se start_time é não decrescente na sequência ordenada."""
-    for idx in range(1, len(ordered)):
-        if ordered[idx].request.start_time < ordered[idx - 1].request.start_time:
-            return False
-    return True
 
 
 def _build_step_emitter(
@@ -189,6 +154,7 @@ def _build_step_emitter(
         binary_search_range: tuple[int, int, int] | None = None,
         active_dp_index: int | None = None,
         referenced_dp_index: int | None = None,
+        last_release_minutes: int | None = None,
     ) -> None:
         step_idx = len(steps)
         if phase.value not in phase_offsets:
@@ -212,6 +178,7 @@ def _build_step_emitter(
                 binary_search_range=binary_search_range,
                 active_dp_index=active_dp_index,
                 referenced_dp_index=referenced_dp_index,
+                last_release_minutes=last_release_minutes,
             )
         )
 
@@ -225,9 +192,8 @@ def _trace_preprocessing_phase(
     statuses: dict[str, SurgeryVisualStatus],
     emit: object,
 ) -> tuple[list[ProcessedSurgery], list[ProcessedSurgery], int]:
-    """Registra a etapa PREPROCESSING para modo clássico, ingênuo ou adaptado."""
+    """Registra a etapa PREPROCESSING para os modos clássico e adaptado."""
     is_classic = algorithm_key in ("classic_greedy", "classic_dp")
-    is_naive = algorithm_key == "naive_reduction"
 
     feasible: list[ProcessedSurgery] = []
     all_processed_for_gantt: list[ProcessedSurgery] = []
@@ -240,7 +206,7 @@ def _trace_preprocessing_phase(
             explanation="Nenhuma cirurgia recebida para validação de viabilidade.",
             active_surgery_id=None,
             statuses=statuses,
-            variables={"n": 0, "feasible_count": 0, "discarded_count": 0},
+            variables={"Total de Cirurgias (n)": 0, "Viáveis / Descartadas": "0 / 0"},
             ordered=(),
             predecessors=(),
             dp_table=(),
@@ -251,6 +217,7 @@ def _trace_preprocessing_phase(
     for idx, surgery in enumerate(items):
         sid = surgery.surgery_id
         statuses[sid] = SurgeryVisualStatus.INSPECTING
+        raw_end = surgery.finish_time + surgery.sterilization_duration
 
         if is_classic:
             release = surgery.finish_time
@@ -259,34 +226,11 @@ def _trace_preprocessing_phase(
             all_processed_for_gantt.append(proc)
             statuses[sid] = SurgeryVisualStatus.FEASIBLE
             reason = (
-                f"Modo clássico puro ignora esterilização (c_i={surgery.sterilization_duration}m) "
-                f"e restrições de turno; adota r_i = f_i = {format_minutes_hhmm(release)}."
+                f"Modo clássico puro ignora esterilização (c_i={surgery.sterilization_duration} min) "
+                f"e restrições de turno; adota liberação r_i = f_i = {format_hhmm_with_min(release)}."
             )
-        elif is_naive:
-            naive_finish = surgery.finish_time + surgery.sterilization_duration
-            proc = ProcessedSurgery(
-                request=surgery, effective_release_time=naive_finish
-            )
-            all_processed_for_gantt.append(proc)
-            naive_items, naive_disc = preprocess_naive_static_reduction(
-                [surgery], shift_config
-            )
-            if naive_disc == 0:
-                feasible.extend(naive_items)
-                statuses[sid] = SurgeryVisualStatus.FEASIBLE
-                reason = (
-                    f"Redução ingênua calcula f'_i = f_i + c_i = {format_minutes_hhmm(naive_finish)} "
-                    f"e aceita dentro do turno."
-                )
-            else:
-                discarded_count += 1
-                statuses[sid] = SurgeryVisualStatus.DISCARDED_INFEASIBLE
-                reason = (
-                    f"Redução ingênua descarta {sid} porque f'_i = {format_minutes_hhmm(naive_finish)} "
-                    f"viola H ou [A, B] mesmo sendo esterilização passiva."
-                )
+            release_label = format_hhmm_with_min(release)
         else:
-            raw_end = surgery.finish_time + surgery.sterilization_duration
             release = compute_effective_release_time(surgery, shift_config)
             proc = ProcessedSurgery(request=surgery, effective_release_time=release)
             all_processed_for_gantt.append(proc)
@@ -297,7 +241,7 @@ def _trace_preprocessing_phase(
                     reason = (
                         f"{sid} é viável (f_i={format_minutes_hhmm(surgery.finish_time)}); "
                         f"esterilização até {format_minutes_hhmm(raw_end)} é absorvida por [A, B], "
-                        f"ajustando r_i para {format_minutes_hhmm(release)}."
+                        f"ajustando r_i para {format_hhmm_with_min(release)}."
                     )
                 elif (
                     shift_config is not None
@@ -305,21 +249,22 @@ def _trace_preprocessing_phase(
                 ):
                     reason = (
                         f"{sid} é viável (atuação médica até {format_minutes_hhmm(surgery.finish_time)} <= H); "
-                        f"esterilização passiva segue até r_i = {format_minutes_hhmm(release)} após H."
+                        f"esterilização passiva segue até r_i = {format_hhmm_with_min(release)} após H."
                     )
                 else:
                     reason = (
-                        f"{sid} é viável; liberação efetiva r_i = "
-                        f"{format_minutes_hhmm(release)} ({release} min)."
+                        f"{sid} é viável; liberação efetiva r_i = {format_hhmm_with_min(release)}."
                     )
+                release_label = format_hhmm_with_min(release)
             else:
                 discarded_count += 1
                 statuses[sid] = SurgeryVisualStatus.DISCARDED_INFEASIBLE
                 reason = (
                     f"{sid} descartada por inviabilidade ativa: intervalo "
                     f"[{format_minutes_hhmm(surgery.start_time)}, {format_minutes_hhmm(surgery.finish_time)}] "
-                    f"viola H ou cruza [A, B)."
+                    f"viola o horizonte H ou cruza a janela [A, B)."
                 )
+                release_label = "Descartada (inviável)"
 
         emit(  # type: ignore[operator]
             phase=TracePhase.PREPROCESSING,
@@ -328,14 +273,17 @@ def _trace_preprocessing_phase(
             active_surgery_id=sid,
             statuses=statuses,
             variables={
-                "i": idx + 1,
-                "n": len(items),
-                "s_i": surgery.start_time,
-                "f_i": surgery.finish_time,
-                "c_i": surgery.sterilization_duration,
-                "r_i": proc.effective_release_time,
-                "feasible_count": len(feasible),
-                "discarded_count": discarded_count,
+                "Cirurgia": f"{sid} ({idx + 1}/{len(items)})",
+                "Intervalo Ativo [s_i, f_i]": (
+                    f"{format_hhmm_with_min(surgery.start_time)} -> "
+                    f"{format_hhmm_with_min(surgery.finish_time)}"
+                ),
+                "Risco e Esterilização (c_i)": (
+                    f"{surgery.surgery_type.value} ({surgery.sterilization_duration} min)"
+                ),
+                "Fim Físico (e_i = f_i + c_i)": format_hhmm_with_min(raw_end),
+                "Liberação Efetiva (r_i)": release_label,
+                "Viáveis / Descartadas": f"{len(feasible)} / {discarded_count}",
             },
             ordered=feasible,
             predecessors=(),
@@ -349,194 +297,163 @@ def _trace_preprocessing_phase(
 def _trace_sorting_phase(
     feasible: list[ProcessedSurgery],
     *,
-    is_presorted: bool,
+    is_classic: bool,
     statuses: dict[str, SurgeryVisualStatus],
     emit: object,
-) -> list[ProcessedSurgery]:
-    """Registra a ordenação (ou validação O(n) de pré-ordenação) por (r_i, f_i, s_i)."""
-    ordered = list(feasible)
-    if not is_presorted:
-        ordered.sort(
-            key=lambda item: (
+) -> tuple[list[ProcessedSurgery], int]:
+    """Registra a ordenação O(n log n) e retorna a sequência ordenada + comparações."""
+    comparisons = [0]
+
+    class _CountedSortKey:
+        """Chave auxiliar apenas para contabilizar comparações reais do Timsort."""
+
+        def __init__(self, key_tuple: tuple[int, int, int]) -> None:
+            self.key_tuple = key_tuple
+
+        def __lt__(self, other: "_CountedSortKey") -> bool:
+            comparisons[0] += 1
+            return self.key_tuple < other.key_tuple
+
+    ordered = sorted(
+        feasible,
+        key=lambda item: _CountedSortKey(
+            (
                 item.effective_release_time,
                 item.request.finish_time,
                 item.request.start_time,
             )
-        )
-        explanation = (
-            f"Ordenados {len(ordered)} itens viáveis em O(n log n) por "
-            "(effective_release_time, finish_time, start_time)."
-        )
-    else:
-        explanation = (
-            f"Validada pré-ordenação de {len(ordered)} itens viáveis em varredura linear O(n)."
-        )
+        ),
+    )
 
+    criterion = (
+        "(f_i, s_i) — término ativo crescente"
+        if is_classic
+        else "(r_i, f_i, s_i) — liberação efetiva crescente"
+    )
     emit(  # type: ignore[operator]
         phase=TracePhase.SORTING,
-        title="Ordenação Canônica",
-        explanation=explanation,
+        title="Ordenação Canônica — O(n log n)",
+        explanation=(
+            f"Ordenados {len(ordered)} itens viáveis em O(n log n) pelo critério {criterion} "
+            f"({comparisons[0]} comparações executadas)."
+        ),
         active_surgery_id=None,
         statuses=statuses,
         variables={
-            "n_prime": len(ordered),
-            "is_presorted": is_presorted,
-            "order_key": "(r_i, f_i, s_i)",
+            "Cirurgias Viáveis (n')": len(ordered),
+            "Critério de Ordenação": criterion,
+            "Comparações na Ordenação": comparisons[0],
         },
         ordered=ordered,
         predecessors=(),
         dp_table=(),
         selected_ids=(),
     )
-    return ordered
+    return ordered, comparisons[0]
 
 
 def _trace_predecessors_phase(
     ordered: Sequence[ProcessedSurgery],
     *,
-    is_presorted: bool,
-    validated_start_order: Sequence[int] | None,
     statuses: dict[str, SurgeryVisualStatus],
     emit: object,
-) -> tuple[list[int], list[int | None], list[int | None]]:
-    """Registra cálculo de predecessores p[1..n'] via dois ponteiros ou bisect_right."""
+) -> tuple[list[int], list[int | None], list[int | None], int]:
+    """Registra cálculo de predecessores p[1..n'] exclusivamente via busca binária O(n log n)."""
     n_prime = len(ordered)
     predecessors_view: list[int | None] = [0] + [None] * n_prime
     dp_view: list[int | None] = [0] + [None] * n_prime
     resolved_p = [0] * (n_prime + 1)
+    binary_search_steps = 0
 
-    use_two_pointers = is_presorted and (
-        validated_start_order is not None or _are_processed_starts_monotonic(ordered)
-    )
-
-    if use_two_pointers:
-        start_order = (
-            validated_start_order
-            if validated_start_order is not None
-            else range(n_prime)
-        )
-        release_ptr = 0
-        for idx in start_order:
-            item = ordered[idx]
-            sid = item.request.surgery_id
-            start_val = item.request.start_time
-            while (
-                release_ptr < idx
-                and ordered[release_ptr].effective_release_time <= start_val
-            ):
-                release_ptr += 1
-            resolved_p[idx + 1] = release_ptr
-            predecessors_view[idx + 1] = release_ptr
+    for idx in range(n_prime):
+        item = ordered[idx]
+        sid = item.request.surgery_id
+        start_val = item.request.start_time
+        lo = 0
+        hi = idx
+        while lo < hi:
+            binary_search_steps += 1
+            mid = (lo + hi) // 2
+            mid_release = ordered[mid].effective_release_time
+            goes_right = mid_release <= start_val
             emit(  # type: ignore[operator]
                 phase=TracePhase.PREDECESSORS,
-                title=f"Predecessor via Dois Ponteiros — p[{idx + 1}] ({sid})",
+                title=f"Busca Binária para p[{idx + 1}] ({sid})",
                 explanation=(
-                    f"Varredura monótona: para {sid} (s_i={format_minutes_hhmm(start_val)}), "
-                    f"release_ptr avançou até {release_ptr}; portanto p[{idx + 1}] = {release_ptr}."
-                ),
-                active_surgery_id=sid,
-                statuses=statuses,
-                variables={
-                    "mode": "two_pointers_O(n)",
-                    "idx": idx + 1,
-                    "s_idx": start_val,
-                    "release_ptr": release_ptr,
-                    "p_i": release_ptr,
-                },
-                ordered=ordered,
-                predecessors=predecessors_view,
-                dp_table=dp_view,
-                selected_ids=(),
-                active_dp_index=idx + 1,
-                referenced_dp_index=release_ptr if release_ptr > 0 else None,
-            )
-    else:
-        for idx in range(n_prime):
-            item = ordered[idx]
-            sid = item.request.surgery_id
-            start_val = item.request.start_time
-            lo = 0
-            hi = idx
-            while lo < hi:
-                mid = (lo + hi) // 2
-                mid_release = ordered[mid].effective_release_time
-                goes_right = mid_release <= start_val
-                emit(  # type: ignore[operator]
-                    phase=TracePhase.PREDECESSORS,
-                    title=f"Busca Binária para p[{idx + 1}] ({sid})",
-                    explanation=(
-                        f"Comparando s[{idx + 1}]={format_minutes_hhmm(start_val)} com "
-                        f"R[mid={mid}]={format_minutes_hhmm(mid_release)}: "
-                        + (
-                            "compatível (lo = mid + 1)."
-                            if goes_right
-                            else "incompatível (hi = mid)."
-                        )
-                    ),
-                    active_surgery_id=sid,
-                    statuses=statuses,
-                    variables={
-                        "mode": "binary_search_O(n_log_n)",
-                        "idx": idx + 1,
-                        "s_idx": start_val,
-                        "lo": lo,
-                        "mid": mid,
-                        "hi": hi,
-                        "r_mid": mid_release,
-                    },
-                    ordered=ordered,
-                    predecessors=predecessors_view,
-                    dp_table=dp_view,
-                    selected_ids=(),
-                    binary_search_range=(lo, mid, hi),
-                    active_dp_index=idx + 1,
-                    referenced_dp_index=mid + 1,
-                )
-                if goes_right:
-                    lo = mid + 1
-                else:
-                    hi = mid
-
-            resolved_p[idx + 1] = lo
-            predecessors_view[idx + 1] = lo
-            emit(  # type: ignore[operator]
-                phase=TracePhase.PREDECESSORS,
-                title=f"Predecessor Definido — p[{idx + 1}] = {lo} ({sid})",
-                explanation=(
-                    f"Busca binária convergiu em lo=hi={lo}. "
+                    f"Comparando s[{idx + 1}]={format_minutes_hhmm(start_val)} com "
+                    f"R[mid={mid}]={format_minutes_hhmm(mid_release)}: "
                     + (
-                        f"Última cirurgia compatível antes de {sid} é o item {lo} "
-                        f"({ordered[lo - 1].request.surgery_id})."
-                        if lo > 0
-                        else f"Nenhuma cirurgia anterior é compatível com {sid} (p[{idx + 1}] = 0)."
+                        "compatível (avança lo = mid + 1)."
+                        if goes_right
+                        else "incompatível (recua hi = mid)."
                     )
                 ),
                 active_surgery_id=sid,
                 statuses=statuses,
                 variables={
-                    "mode": "binary_search_O(n_log_n)",
-                    "idx": idx + 1,
-                    "s_idx": start_val,
-                    "lo": lo,
-                    "hi": hi,
-                    "p_i": lo,
+                    "Cirurgia": f"{sid} (índice {idx + 1})",
+                    "Início (s_i)": format_hhmm_with_min(start_val),
+                    "Janela [lo, mid, hi]": f"[{lo}, {mid}, {hi}]",
+                    "Liberação R[mid]": format_hhmm_with_min(mid_release),
+                    "Teste R[mid] <= s_i": "Compatível (lo = mid + 1)"
+                    if goes_right
+                    else "Conflito (hi = mid)",
                 },
                 ordered=ordered,
                 predecessors=predecessors_view,
                 dp_table=dp_view,
                 selected_ids=(),
+                binary_search_range=(lo, mid, hi),
                 active_dp_index=idx + 1,
-                referenced_dp_index=lo if lo > 0 else None,
+                referenced_dp_index=mid + 1,
             )
+            if goes_right:
+                lo = mid + 1
+            else:
+                hi = mid
 
-    return resolved_p, predecessors_view, dp_view
+        resolved_p[idx + 1] = lo
+        predecessors_view[idx + 1] = lo
+        pred_label = (
+            f"{lo} ({ordered[lo - 1].request.surgery_id})"
+            if lo > 0
+            else "0 (nenhum compatível)"
+        )
+        emit(  # type: ignore[operator]
+            phase=TracePhase.PREDECESSORS,
+            title=f"Predecessor Definido — p[{idx + 1}] = {lo} ({sid})",
+            explanation=(
+                f"Busca binária convergiu em lo=hi={lo}. "
+                + (
+                    f"Última cirurgia compatível antes de {sid} é o item {lo} "
+                    f"({ordered[lo - 1].request.surgery_id})."
+                    if lo > 0
+                    else f"Nenhuma cirurgia anterior é compatível com {sid} (p[{idx + 1}] = 0)."
+                )
+            ),
+            active_surgery_id=sid,
+            statuses=statuses,
+            variables={
+                "Cirurgia": f"{sid} (índice {idx + 1})",
+                "Início (s_i)": format_hhmm_with_min(start_val),
+                "Predecessor p[i]": pred_label,
+            },
+            ordered=ordered,
+            predecessors=predecessors_view,
+            dp_table=dp_view,
+            selected_ids=(),
+            active_dp_index=idx + 1,
+            referenced_dp_index=lo if lo > 0 else None,
+        )
+
+    return resolved_p, predecessors_view, dp_view, binary_search_steps
 
 
 def _trace_greedy_selection_phase(
     ordered: Sequence[ProcessedSurgery],
     statuses: dict[str, SurgeryVisualStatus],
     emit: object,
-) -> list[str]:
+) -> tuple[list[str], int]:
     """Registra a varredura linear gulosa com evolução de last_release."""
     last_release = -1
     selected_ids: list[str] = []
@@ -546,6 +463,11 @@ def _trace_greedy_selection_phase(
         start_val = item.request.start_time
         release_val = item.effective_release_time
         prev_last_release = last_release
+        prev_label = (
+            format_hhmm_with_min(prev_last_release)
+            if prev_last_release >= 0
+            else "Livre (início do turno)"
+        )
         statuses[sid] = SurgeryVisualStatus.INSPECTING
 
         if start_val >= last_release:
@@ -553,16 +475,23 @@ def _trace_greedy_selection_phase(
             selected_ids.append(sid)
             last_release = release_val
             decision = "SELECIONADA"
+            comparison = (
+                f"{format_minutes_hhmm(start_val)} >= "
+                f"{format_minutes_hhmm(prev_last_release) if prev_last_release >= 0 else '00:00'}"
+            )
             explanation = (
-                f"{sid} inicia em {format_minutes_hhmm(start_val)} >= last_release "
-                f"({format_minutes_hhmm(prev_last_release) if prev_last_release >= 0 else '-1'}). "
-                f"Selecionada; last_release atualizado para {format_minutes_hhmm(last_release)}."
+                f"{sid} inicia em {format_minutes_hhmm(start_val)} >= última liberação "
+                f"({format_minutes_hhmm(prev_last_release) if prev_last_release >= 0 else 'início'}). "
+                f"Selecionada; sala libera em {format_hhmm_with_min(last_release)}."
             )
         else:
             statuses[sid] = SurgeryVisualStatus.REJECTED_CONFLICT
             decision = "REJEITADA"
+            comparison = (
+                f"{format_minutes_hhmm(start_val)} < {format_minutes_hhmm(prev_last_release)}"
+            )
             explanation = (
-                f"{sid} inicia em {format_minutes_hhmm(start_val)} < last_release "
+                f"{sid} inicia em {format_minutes_hhmm(start_val)} < última liberação "
                 f"({format_minutes_hhmm(prev_last_release)}). Rejeitada por conflito temporal."
             )
 
@@ -573,22 +502,24 @@ def _trace_greedy_selection_phase(
             active_surgery_id=sid,
             statuses=statuses,
             variables={
-                "step": idx + 1,
-                "s_i": start_val,
-                "r_i": release_val,
-                "previous_last_release": prev_last_release,
-                "last_release": last_release,
-                "decision": decision,
-                "selected_count": len(selected_ids),
+                "Passo": f"{idx + 1}/{len(ordered)} ({sid})",
+                "Início (s_i)": format_hhmm_with_min(start_val),
+                "Liberação (r_i)": format_hhmm_with_min(release_val),
+                "Última Liberação Anterior": prev_label,
+                "Comparação (s_i >= r_última)": comparison,
+                "Nova Liberação da Sala": format_hhmm_with_min(last_release),
+                "Decisão": decision,
+                "Total Selecionadas": len(selected_ids),
             },
             ordered=ordered,
             predecessors=(),
             dp_table=(),
             selected_ids=selected_ids,
             active_dp_index=idx + 1,
+            last_release_minutes=last_release,
         )
 
-    return selected_ids
+    return selected_ids, len(ordered)
 
 
 def _trace_dp_table_and_backtracking(
@@ -598,7 +529,7 @@ def _trace_dp_table_and_backtracking(
     dp_view: list[int | None],
     statuses: dict[str, SurgeryVisualStatus],
     emit: object,
-) -> list[str]:
+) -> tuple[list[str], int, int]:
     """Registra o preenchimento de DP[1..n'] e a reconstrução via backtracking."""
     n_prime = len(ordered)
     dp = [0] * (n_prime + 1)
@@ -623,13 +554,12 @@ def _trace_dp_table_and_backtracking(
             active_surgery_id=sid,
             statuses=statuses,
             variables={
-                "i": i,
-                "p_i": pred,
-                "dp_pred": dp[pred],
-                "include_count": include_count,
-                "exclude_count": exclude_count,
-                "dp_i": dp[i],
-                "prefer_include": chosen_include,
+                "Índice (i)": f"{i} ({sid})",
+                "Predecessor p[i]": pred,
+                "Excluir (DP[i-1])": exclude_count,
+                "Incluir (1 + DP[p[i]])": f"1 + {dp[pred]} = {include_count}",
+                "Valor DP[i]": dp[i],
+                "Melhor Escolha": "Incluir cirurgia" if chosen_include else "Manter DP[i-1]",
             },
             ordered=ordered,
             predecessors=predecessors_view,
@@ -641,7 +571,9 @@ def _trace_dp_table_and_backtracking(
 
     selected_reversed: list[str] = []
     current = n_prime
+    backtrack_steps = 0
     while current > 0:
+        backtrack_steps += 1
         item = ordered[current - 1]
         sid = item.request.surgery_id
         pred = resolved_p[current]
@@ -653,6 +585,7 @@ def _trace_dp_table_and_backtracking(
             statuses[sid] = SurgeryVisualStatus.SELECTED
             selected_reversed.append(sid)
             next_idx = pred
+            decision_label = f"SELECIONA {sid} e salta para i={next_idx}"
             explanation = (
                 f"Backtracking em i={current} ({sid}): 1 + DP[{pred}] ({include_val}) > "
                 f"DP[{current - 1}] ({exclude_val}). Seleciona {sid} e salta para i={next_idx}."
@@ -660,6 +593,7 @@ def _trace_dp_table_and_backtracking(
         else:
             statuses[sid] = SurgeryVisualStatus.REJECTED_CONFLICT
             next_idx = current - 1
+            decision_label = f"DESCARTA {sid} e recua para i={next_idx}"
             explanation = (
                 f"Backtracking em i={current} ({sid}): 1 + DP[{pred}] ({include_val}) <= "
                 f"DP[{current - 1}] ({exclude_val}). Descarta {sid} e recua para i={next_idx}."
@@ -672,12 +606,12 @@ def _trace_dp_table_and_backtracking(
             active_surgery_id=sid,
             statuses=statuses,
             variables={
-                "current": current,
-                "next_current": next_idx,
-                "p_current": pred,
-                "include_val": include_val,
-                "exclude_val": exclude_val,
-                "taken": take,
+                "Índice Atual (i)": f"{current} ({sid})",
+                "Predecessor p[i]": pred,
+                "Excluir (DP[i-1])": exclude_val,
+                "Incluir (1 + DP[p[i]])": include_val,
+                "Decisão": decision_label,
+                "Próximo Índice": next_idx,
             },
             ordered=ordered,
             predecessors=predecessors_view,
@@ -689,7 +623,109 @@ def _trace_dp_table_and_backtracking(
         current = next_idx
 
     selected_reversed.reverse()
-    return selected_reversed
+    return selected_reversed, n_prime, backtrack_steps
+
+
+def _build_complexity_summary(
+    *,
+    algorithm_key: str,
+    algorithm_name: str,
+    input_n: int,
+    feasible_n: int,
+    sort_comparisons: int,
+    predecessor_ops: int,
+    selection_or_dp_ops: int,
+    backtrack_ops: int,
+) -> dict[str, object]:
+    """Constrói resumo didático de fórmulas e complexidade real por fase."""
+    is_classic = algorithm_key in ("classic_greedy", "classic_dp")
+    is_dp = algorithm_key in ("classic_dp", "adapted_dp")
+
+    sorting_formula = (
+        "Ordena pelo término médico f_i crescente (ignora esterilização c_i, horizonte H e janela [A, B])."
+        if is_classic
+        else "Filtra f_i <= H e (f_i <= A ou s_i >= B); calcula r_i = B se f_i <= A e A < f_i + c_i < B, senão r_i = f_i + c_i; ordena por r_i."
+    )
+    decision_formula = (
+        (
+            "p(i) = max{j < i | f_j <= s_i}; DP[i] = max(DP[i-1], 1 + DP[p(i)])"
+            if is_classic
+            else "p(i) = max{j < i | r_j <= s_i}; DP[i] = max(DP[i-1], 1 + DP[p(i)])"
+        )
+        if is_dp
+        else (
+            "Seleciona cirurgia i se s_i >= f_última"
+            if is_classic
+            else "Seleciona cirurgia i se s_i >= r_última"
+        )
+    )
+
+    phases: list[dict[str, object]] = [
+        {
+            "phase": "1. Pré-processamento",
+            "complexity": "O(n)",
+            "operations": input_n,
+            "description": (
+                f"Inspeciona {input_n} cirurgia(s) ({feasible_n} viáveis)."
+                if not is_classic
+                else f"Adota todas as {input_n} cirurgias com r_i = f_i."
+            ),
+        },
+        {
+            "phase": "2. Ordenação",
+            "complexity": "O(n log n)",
+            "operations": sort_comparisons,
+            "description": (
+                f"Timsort sobre {feasible_n} itens ({sort_comparisons} comparações)."
+            ),
+        },
+    ]
+
+    if is_dp:
+        phases.extend(
+            [
+                {
+                    "phase": "3. Predecessores p[i] (Busca Binária)",
+                    "complexity": "O(n log n)",
+                    "operations": predecessor_ops,
+                    "description": (
+                        f"Busca binária (bisect_right) executada em {predecessor_ops} iterações."
+                    ),
+                },
+                {
+                    "phase": "4. Preenchimento Tabela DP[i]",
+                    "complexity": "O(n)",
+                    "operations": selection_or_dp_ops,
+                    "description": f"Preenche {selection_or_dp_ops} subproblemas DP[1..n'].",
+                },
+                {
+                    "phase": "5. Backtracking (Reconstrução)",
+                    "complexity": "O(n)",
+                    "operations": backtrack_ops,
+                    "description": f"Reconstrói agenda ótima em {backtrack_ops} saltos.",
+                },
+            ]
+        )
+    else:
+        phases.append(
+            {
+                "phase": "3. Varredura Gulosa Linear",
+                "complexity": "O(n)",
+                "operations": selection_or_dp_ops,
+                "description": f"Testa compatibilidade s_i >= r_última em {selection_or_dp_ops} passos.",
+            }
+        )
+
+    return {
+        "algorithm_name": algorithm_name,
+        "time_complexity": "O(n log n)",
+        "space_complexity": "O(n)",
+        "sorting_key_formula": sorting_formula,
+        "decision_rule_formula": decision_formula,
+        "input_n": input_n,
+        "feasible_n": feasible_n,
+        "phases": phases,
+    }
 
 
 def trace_scheduler_execution(
@@ -697,8 +733,6 @@ def trace_scheduler_execution(
     shift_config: ShiftConfig | None = None,
     *,
     algorithm_key: str = "adapted_greedy",
-    is_presorted: bool = False,
-    presorted_start_indices: Sequence[int] | None = None,
 ) -> SimulationTrace:
     """Executa rastreamento passo a passo desacoplado e valida paridade com schedule()."""
     items = validate_scheduler_inputs(surgeries, shift_config)
@@ -708,34 +742,7 @@ def trace_scheduler_execution(
         )
 
     scheduler = _resolve_scheduler(algorithm_key)
-    final_result = _run_production_scheduler(
-        scheduler,
-        algorithm_key,
-        items,
-        shift_config,
-        is_presorted=is_presorted,
-        presorted_start_indices=presorted_start_indices,
-    )
-
-    validated_start_order: Sequence[int] | None = None
-    if presorted_start_indices is not None:
-        target_for_indices = (
-            items
-            if algorithm_key == "classic_dp"
-            else [
-                ProcessedSurgery(
-                    request=item,
-                    effective_release_time=compute_effective_release_time(
-                        item, shift_config
-                    ),
-                )
-                for item in items
-                if is_actively_feasible(item, shift_config)
-            ]
-        )
-        validated_start_order = validate_presorted_start_indices(
-            target_for_indices, presorted_start_indices
-        )
+    final_result = scheduler.schedule(items, shift_config=shift_config)
 
     steps: list[SimulationStep] = []
     phase_offsets: dict[str, int] = {}
@@ -744,37 +751,42 @@ def trace_scheduler_execution(
     }
     emit = _build_step_emitter(steps, phase_offsets)
 
+    is_classic = algorithm_key in ("classic_greedy", "classic_dp")
+    is_dp = algorithm_key in ("classic_dp", "adapted_dp")
+
     feasible, all_processed_for_gantt, discarded_count = _trace_preprocessing_phase(
         algorithm_key, items, shift_config, statuses, emit
     )
-    ordered = _trace_sorting_phase(
-        feasible, is_presorted=is_presorted, statuses=statuses, emit=emit
+    ordered, sort_comparisons = _trace_sorting_phase(
+        feasible, is_classic=is_classic, statuses=statuses, emit=emit
     )
 
-    is_dp = algorithm_key in ("classic_dp", "adapted_dp")
     predecessors_view: list[int | None] = []
     dp_view: list[int | None] = []
     selected_ids: list[str] = []
+    predecessor_ops = 0
+    selection_or_dp_ops = 0
+    backtrack_ops = 0
 
     if ordered:
         if is_dp:
-            resolved_p, predecessors_view, dp_view = _trace_predecessors_phase(
-                ordered,
-                is_presorted=is_presorted,
-                validated_start_order=validated_start_order,
-                statuses=statuses,
-                emit=emit,
+            resolved_p, predecessors_view, dp_view, predecessor_ops = (
+                _trace_predecessors_phase(ordered, statuses=statuses, emit=emit)
             )
-            selected_ids = _trace_dp_table_and_backtracking(
-                ordered,
-                resolved_p,
-                predecessors_view,
-                dp_view,
-                statuses,
-                emit,
+            selected_ids, selection_or_dp_ops, backtrack_ops = (
+                _trace_dp_table_and_backtracking(
+                    ordered,
+                    resolved_p,
+                    predecessors_view,
+                    dp_view,
+                    statuses,
+                    emit,
+                )
             )
         else:
-            selected_ids = _trace_greedy_selection_phase(ordered, statuses, emit)
+            selected_ids, selection_or_dp_ops = _trace_greedy_selection_phase(
+                ordered, statuses, emit
+            )
 
     emit(  # type: ignore[operator]
         phase=TracePhase.RESULT,
@@ -786,9 +798,9 @@ def trace_scheduler_execution(
         active_surgery_id=None,
         statuses=statuses,
         variables={
-            "total_selected": len(selected_ids),
-            "discarded_infeasible_count": discarded_count,
-            "elapsed_ns": final_result.elapsed_ns,
+            "Total Selecionadas": len(selected_ids),
+            "Descartadas (Inviáveis)": discarded_count,
+            "Agenda Escolhida": ", ".join(selected_ids) if selected_ids else "(vazia)",
         },
         ordered=ordered,
         predecessors=predecessors_view,
@@ -802,16 +814,27 @@ def trace_scheduler_execution(
             f"Divergência interna no tracer ({selected_ids}) vs schedule() ({expected_ids})."
         )
 
+    complexity_summary = _build_complexity_summary(
+        algorithm_key=algorithm_key,
+        algorithm_name=scheduler.name,
+        input_n=len(items),
+        feasible_n=len(ordered),
+        sort_comparisons=sort_comparisons,
+        predecessor_ops=predecessor_ops,
+        selection_or_dp_ops=selection_or_dp_ops,
+        backtrack_ops=backtrack_ops,
+    )
+
     return SimulationTrace(
         algorithm_key=algorithm_key,
         algorithm_name=scheduler.name,
-        is_presorted=is_presorted,
         input_surgeries=tuple(items),
         processed_surgeries=tuple(all_processed_for_gantt),
         shift_config=shift_config,
         final_result=final_result,
         steps=tuple(steps),
         phase_offsets=phase_offsets,
+        complexity_summary=complexity_summary,
     )
 
 
@@ -850,57 +873,17 @@ def _audit_physical_conflicts(
     return tuple(conflicts)
 
 
-def _prepare_input_for_algorithm(
-    items: list[SurgeryRequest],
-    algorithm_key: str,
-    shift_config: ShiftConfig | None,
-    *,
-    is_presorted: bool,
-) -> list[SurgeryRequest]:
-    """Prepara entrada ordenada conforme a chave de cada algoritmo quando is_presorted=True."""
-    if not is_presorted:
-        return items
-    if algorithm_key in ("classic_greedy", "classic_dp"):
-        return sorted(items, key=lambda s: (s.finish_time, s.start_time))
-    if algorithm_key == "naive_reduction":
-        return sorted(
-            items,
-            key=lambda s: (
-                s.finish_time + s.sterilization_duration,
-                s.finish_time,
-                s.start_time,
-            ),
-        )
-    return sorted(
-        items,
-        key=lambda s: (
-            compute_effective_release_time(s, shift_config),
-            s.finish_time,
-            s.start_time,
-        ),
-    )
-
-
 def run_comparative_arena(
     surgeries: Sequence[SurgeryRequest],
     shift_config: ShiftConfig | None = None,
-    *,
-    is_presorted: bool = False,
 ) -> tuple[AlgorithmComparisonEntry, ...]:
-    """Executa os 5 escalonadores lado a lado e audita violações físicas nas agendas."""
+    """Executa os 4 escalonadores lado a lado e audita violações físicas nas agendas."""
     items = validate_scheduler_inputs(surgeries, shift_config)
     entries: list[AlgorithmComparisonEntry] = []
 
     for key in ALGORITHM_KEYS:
         scheduler = _resolve_scheduler(key)
-        prepared = _prepare_input_for_algorithm(
-            items, key, shift_config, is_presorted=is_presorted
-        )
-        result = scheduler.schedule(
-            prepared,
-            shift_config=shift_config,
-            is_presorted=is_presorted,
-        )
+        result = scheduler.schedule(items, shift_config=shift_config)
         conflicts = _audit_physical_conflicts(result.selected_surgeries, shift_config)
         entries.append(
             AlgorithmComparisonEntry(
@@ -970,7 +953,6 @@ def serialize_trace_to_dict(trace: SimulationTrace) -> dict[str, object]:
     return {
         "algorithm_key": trace.algorithm_key,
         "algorithm_name": trace.algorithm_name,
-        "is_presorted": trace.is_presorted,
         "shift_config": serialize_shift_config(trace.shift_config),
         "processed_surgeries": [
             serialize_processed_surgery(item) for item in trace.processed_surgeries
@@ -985,6 +967,7 @@ def serialize_trace_to_dict(trace: SimulationTrace) -> dict[str, object]:
             ],
         },
         "phase_offsets": dict(trace.phase_offsets),
+        "complexity_summary": dict(trace.complexity_summary),
         "steps": [
             {
                 "step_index": step.step_index,
@@ -1006,6 +989,7 @@ def serialize_trace_to_dict(trace: SimulationTrace) -> dict[str, object]:
                 ),
                 "active_dp_index": step.active_dp_index,
                 "referenced_dp_index": step.referenced_dp_index,
+                "last_release_minutes": step.last_release_minutes,
             }
             for step in trace.steps
         ],

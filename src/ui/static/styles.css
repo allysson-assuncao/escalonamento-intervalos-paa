@@ -186,11 +186,6 @@ select {
   font-weight: 700;
 }
 
-.full-width {
-  width: 100%;
-  margin-top: 0.55rem;
-}
-
 .row-gap {
   display: flex;
   gap: 0.5rem;
@@ -244,7 +239,7 @@ select {
 }
 
 .table-scroll {
-  max-height: 250px;
+  max-height: 260px;
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -360,6 +355,83 @@ select {
   color: #ffffff;
 }
 
+/* Card de Resumo Matemático e Complexidade */
+.complexity-card summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.complexity-summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.complexity-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.complexity-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.metric-pill {
+  background: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-family: Consolas, monospace;
+}
+
+.metric-pill-muted {
+  background: #f1f5f9;
+  color: #334155;
+  border-color: #cbd5e1;
+}
+
+.formula-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+  margin: 0.75rem 0;
+}
+
+@media (max-width: 900px) {
+  .formula-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.formula-box {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 0.75rem;
+}
+
+.formula-label {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+
+.formula-code {
+  font-family: Consolas, monospace;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .narration-header {
   display: flex;
   align-items: center;
@@ -446,7 +518,7 @@ select {
 
 .variables-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(135px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
   gap: 0.55rem;
 }
 
@@ -460,11 +532,11 @@ select {
 .var-name {
   font-size: 0.74rem;
   color: var(--muted);
-  font-family: Consolas, monospace;
+  font-weight: 600;
 }
 
 .var-value {
-  font-size: 0.98rem;
+  font-size: 0.93rem;
   font-weight: 700;
   font-family: Consolas, monospace;
   color: var(--text);
@@ -530,40 +602,4 @@ select {
   border-radius: 999px;
   font-weight: 700;
   font-size: 0.76rem;
-}
-
-.bench-controls {
-  display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1.5fr;
-  gap: 0.75rem;
-  align-items: end;
-}
-
-@media (max-width: 900px) {
-  .bench-controls {
-    grid-template-columns: 1fr;
-  }
-}
-
-.charts-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.9rem;
-}
-
-@media (max-width: 1100px) {
-  .charts-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.mono-pre {
-  background: #0f172a;
-  color: #e2e8f0;
-  padding: 0.85rem;
-  border-radius: 6px;
-  overflow-x: auto;
-  font-family: Consolas, monospace;
-  font-size: 0.8rem;
-  margin: 0;
 }

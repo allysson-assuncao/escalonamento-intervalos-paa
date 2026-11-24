@@ -1,17 +1,11 @@
 """Servidor HTTP local em loopback (Stdlib) para a interface de simulação visual."""
 
-from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from src.benchmark.runner import (
-    format_benchmark_table,
-    generate_synthetic_surgeries,
-    run_scaling_benchmark,
-)
 from src.domain.exceptions import InvalidSchedulingInputError
 from src.domain.models import (
     ShiftConfig,
@@ -20,21 +14,12 @@ from src.domain.models import (
     SurgeryType,
     is_strict_int,
 )
-from src.schedulers import (
-    AdaptedDPScheduler,
-    AdaptedGreedyScheduler,
-    ClassicDPScheduler,
-    ClassicGreedyScheduler,
-    IntervalSchedulerProtocol,
-    NaiveReductionScheduler,
-)
 from src.ui.scenarios_catalog import get_scenario_presets
 from src.ui.tracer import (
     MAX_TRACE_INPUT_SIZE,
     run_comparative_arena,
     serialize_comparison_to_dict,
     serialize_scenario_preset_to_dict,
-    serialize_surgery_request,
     serialize_trace_to_dict,
     trace_scheduler_execution,
 )
@@ -42,10 +27,7 @@ from src.ui.tracer import (
 DEFAULT_HOST: str = "127.0.0.1"
 DEFAULT_PORT: int = 8765
 MAX_REQUEST_BODY_BYTES: int = 262_144
-MAX_GENERATE_SIZE: int = 5000
-MAX_BENCHMARK_SIZE: int = 10000
-MAX_BENCHMARK_REPETITIONS: int = 20
-MAX_BENCHMARK_SIZES_COUNT: int = 12
+MAX_COMPARE_INPUT_SIZE: int = 500
 
 STATIC_DIR: Path = Path(__file__).resolve().parent / "static"
 
@@ -138,15 +120,6 @@ def parse_surgeries_payload(raw_surgeries: object) -> list[SurgeryRequest]:
     return parsed
 
 
-def _parse_strict_bool(value: object, field_name: str) -> bool:
-    """Valida que o campo JSON é estritamente booleano."""
-    if not isinstance(value, bool):
-        raise InvalidSchedulingInputError(
-            f"O campo '{field_name}' deve ser um booleano válido."
-        )
-    return value
-
-
 def _handle_trace_request(payload: dict[str, object]) -> dict[str, object]:
     """Processa requisição POST /api/trace com limites de tamanho e validação."""
     surgeries = parse_surgeries_payload(payload.get("surgeries"))
@@ -158,148 +131,26 @@ def _handle_trace_request(payload: dict[str, object]) -> dict[str, object]:
     algorithm_key = payload.get("algorithm_key", "adapted_greedy")
     if not isinstance(algorithm_key, str):
         raise InvalidSchedulingInputError("algorithm_key deve ser uma string.")
-    is_presorted = _parse_strict_bool(
-        payload.get("is_presorted", False), "is_presorted"
-    )
-    raw_indices = payload.get("presorted_start_indices")
-    presorted_indices: list[int] | None = None
-    if raw_indices is not None:
-        if not isinstance(raw_indices, list) or not all(
-            is_strict_int(idx) for idx in raw_indices
-        ):
-            raise InvalidSchedulingInputError(
-                "presorted_start_indices deve ser uma lista de inteiros."
-            )
-        presorted_indices = list(raw_indices)
 
     trace = trace_scheduler_execution(
         surgeries,
         shift_config,
         algorithm_key=algorithm_key,
-        is_presorted=is_presorted,
-        presorted_start_indices=presorted_indices,
     )
     return serialize_trace_to_dict(trace)
 
 
 def _handle_compare_request(payload: dict[str, object]) -> dict[str, object]:
-    """Processa requisição POST /api/compare para os 5 algoritmos."""
+    """Processa requisição POST /api/compare para os 4 algoritmos."""
     surgeries = parse_surgeries_payload(payload.get("surgeries"))
-    if len(surgeries) > MAX_GENERATE_SIZE:
+    if len(surgeries) > MAX_COMPARE_INPUT_SIZE:
         raise InvalidSchedulingInputError(
-            f"A comparação suporta no máximo {MAX_GENERATE_SIZE} cirurgias."
+            f"A comparação suporta no máximo {MAX_COMPARE_INPUT_SIZE} cirurgias."
         )
     shift_config = parse_shift_config_payload(payload.get("shift_config"))
-    is_presorted = _parse_strict_bool(
-        payload.get("is_presorted", False), "is_presorted"
-    )
-    entries = run_comparative_arena(
-        surgeries,
-        shift_config,
-        is_presorted=is_presorted,
-    )
+    entries = run_comparative_arena(surgeries, shift_config)
     return {
         "entries": [serialize_comparison_to_dict(entry) for entry in entries],
-    }
-
-
-def _handle_generate_request(payload: dict[str, object]) -> dict[str, object]:
-    """Processa requisição POST /api/generate com limite interativo n <= 5000."""
-    n = payload.get("n")
-    if not is_strict_int(n) or n < 0 or n > MAX_GENERATE_SIZE:
-        raise InvalidSchedulingInputError(
-            f"O campo 'n' deve ser um inteiro entre 0 e {MAX_GENERATE_SIZE}."
-        )
-    seed = payload.get("seed", 42)
-    if not is_strict_int(seed):
-        raise InvalidSchedulingInputError("seed deve ser um inteiro estrito.")
-    contaminated_ratio = payload.get("contaminated_ratio", 0.35)
-    horizon = payload.get("horizon", 1080)
-    if not is_strict_int(horizon) or horizon <= 0:
-        raise InvalidSchedulingInputError(
-            "horizon deve ser um inteiro estritamente positivo."
-        )
-
-    surgeries = generate_synthetic_surgeries(
-        n,
-        seed=seed,
-        contaminated_ratio=contaminated_ratio,  # type: ignore[arg-type]
-        horizon=horizon,
-    )
-    return {
-        "surgeries": [serialize_surgery_request(item) for item in surgeries],
-    }
-
-
-def _handle_benchmark_request(payload: dict[str, object]) -> dict[str, object]:
-    """Processa requisição POST /api/benchmark com limites interativos de execução."""
-    raw_sizes = payload.get("sizes", [100, 500, 1000, 2500])
-    if (
-        not isinstance(raw_sizes, list)
-        or len(raw_sizes) == 0
-        or len(raw_sizes) > MAX_BENCHMARK_SIZES_COUNT
-    ):
-        raise InvalidSchedulingInputError(
-            f"sizes deve conter de 1 a {MAX_BENCHMARK_SIZES_COUNT} tamanhos inteiros."
-        )
-    for size in raw_sizes:
-        if not is_strict_int(size) or size < 0 or size > MAX_BENCHMARK_SIZE:
-            raise InvalidSchedulingInputError(
-                f"Cada tamanho em sizes deve estar entre 0 e {MAX_BENCHMARK_SIZE}."
-            )
-
-    repetitions = payload.get("repetitions", 3)
-    if (
-        not is_strict_int(repetitions)
-        or repetitions <= 0
-        or repetitions > MAX_BENCHMARK_REPETITIONS
-    ):
-        raise InvalidSchedulingInputError(
-            f"repetitions deve ser um inteiro entre 1 e {MAX_BENCHMARK_REPETITIONS}."
-        )
-
-    seed = payload.get("seed", 42)
-    if not is_strict_int(seed):
-        raise InvalidSchedulingInputError("seed deve ser um inteiro estrito.")
-
-    contaminated_ratio = payload.get("contaminated_ratio", 0.35)
-    is_presorted = _parse_strict_bool(
-        payload.get("is_presorted", False), "is_presorted"
-    )
-    include_naive = _parse_strict_bool(
-        payload.get("include_naive", False), "include_naive"
-    )
-    shift_config = parse_shift_config_payload(payload.get("shift_config"))
-
-    schedulers: tuple[IntervalSchedulerProtocol, ...] = (
-        (
-            ClassicGreedyScheduler(),
-            ClassicDPScheduler(),
-            NaiveReductionScheduler(),
-            AdaptedGreedyScheduler(),
-            AdaptedDPScheduler(),
-        )
-        if include_naive
-        else (
-            ClassicGreedyScheduler(),
-            ClassicDPScheduler(),
-            AdaptedGreedyScheduler(),
-            AdaptedDPScheduler(),
-        )
-    )
-
-    points = run_scaling_benchmark(
-        raw_sizes,
-        schedulers=schedulers,
-        shift_config=shift_config,
-        repetitions=repetitions,
-        seed=seed,
-        contaminated_ratio=contaminated_ratio,  # type: ignore[arg-type]
-        is_presorted=is_presorted,
-    )
-    return {
-        "points": [asdict(point) for point in points],
-        "table": format_benchmark_table(points),
     }
 
 
@@ -425,13 +276,11 @@ class SimulationRequestHandler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "Rota não encontrada."})
 
     def do_POST(self) -> None:
-        """Atende endpoints JSON de rastreamento, comparação, geração e benchmark."""
+        """Atende endpoints JSON de rastreamento e comparação dos 4 algoritmos."""
         clean_path = unquote(urlsplit(self.path).path)
         routes = {
             "/api/trace": _handle_trace_request,
             "/api/compare": _handle_compare_request,
-            "/api/generate": _handle_generate_request,
-            "/api/benchmark": _handle_benchmark_request,
         }
         handler = routes.get(clean_path)
         if handler is None:

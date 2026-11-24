@@ -1,4 +1,4 @@
-"""Catálogo canônico compartilhado de cenários determinísticos SC-01 a SC-05."""
+"""Catálogo canônico compartilhado de cenários didáticos CASE-01 a CASE-04."""
 
 from dataclasses import dataclass
 
@@ -11,7 +11,7 @@ DEFAULT_SHIFT_WINDOW: ShiftWindow = ShiftWindow(start=720, end=780)  # 12:00-13:
 
 @dataclass(frozen=True)
 class ScenarioPreset:
-    """Metadados e dados imutáveis de um cenário pré-configurado de apresentação."""
+    """Metadados e dados imutáveis de um cenário didático pré-configurado."""
 
     scenario_id: str
     title: str
@@ -20,34 +20,20 @@ class ScenarioPreset:
     shift_config: ShiftConfig | None
 
 
-def build_sc01_classic_homogeneous_surgeries() -> list[SurgeryRequest]:
-    """Retorna o cenário SC-01 (cirurgias limpas em ordem embaralhada, ótimo = 5)."""
-    return [
-        SurgeryRequest(surgery_id="C8", start_time=900, finish_time=1020),   # 15:00-17:00
-        SurgeryRequest(surgery_id="C2", start_time=510, finish_time=630),    # 08:30-10:30
-        SurgeryRequest(surgery_id="C5", start_time=660, finish_time=780),    # 11:00-13:00
-        SurgeryRequest(surgery_id="C1", start_time=480, finish_time=570),    # 08:00-09:30
-        SurgeryRequest(surgery_id="C7", start_time=750, finish_time=900),    # 12:30-15:00
-        SurgeryRequest(surgery_id="C4", start_time=600, finish_time=750),    # 10:00-12:30
-        SurgeryRequest(surgery_id="C6", start_time=690, finish_time=720),    # 11:30-12:00
-        SurgeryRequest(surgery_id="C3", start_time=570, finish_time=660),    # 09:30-11:00
+def build_case01_classic_baseline() -> tuple[list[SurgeryRequest], ShiftConfig]:
+    """Retorna CASE-01: apenas cirurgias limpas (todos os 4 algoritmos empatam em 3)."""
+    surgeries = [
+        SurgeryRequest(surgery_id="S2", start_time=540, finish_time=720),   # 09:00-12:00
+        SurgeryRequest(surgery_id="S4", start_time=690, finish_time=810),   # 11:30-13:30
+        SurgeryRequest(surgery_id="S1", start_time=480, finish_time=600),   # 08:00-10:00
+        SurgeryRequest(surgery_id="S3", start_time=600, finish_time=690),   # 10:00-11:30
     ]
+    shift_config = ShiftConfig(closing_horizon=DEFAULT_CLOSING_HORIZON)
+    return surgeries, shift_config
 
 
-def build_monotonic_start_presorted_surgeries() -> list[SurgeryRequest]:
-    """Retorna sequência já ordenada por (finish_time, start_time) com inícios monótonos."""
-    return [
-        SurgeryRequest(surgery_id="M1", start_time=10, finish_time=30),
-        SurgeryRequest(surgery_id="M2", start_time=20, finish_time=50),
-        SurgeryRequest(surgery_id="M3", start_time=30, finish_time=60),
-        SurgeryRequest(surgery_id="M4", start_time=60, finish_time=90),
-        SurgeryRequest(surgery_id="M5", start_time=80, finish_time=110),
-        SurgeryRequest(surgery_id="M6", start_time=95, finish_time=120),
-    ]
-
-
-def build_sc02_counterexample_surgeries() -> tuple[list[SurgeryRequest], ShiftConfig]:
-    """Retorna o contrexemplo canônico SC-02 de 3 cirurgias (ótimo adaptado = {S2, S3})."""
+def build_case02_sterilization_and_horizon() -> tuple[list[SurgeryRequest], ShiftConfig]:
+    """Retorna CASE-02: contrexemplo de esterilização c_i e horizonte H (ótimo = {S2, S3})."""
     surgeries = [
         SurgeryRequest(
             surgery_id="S1",
@@ -75,206 +61,154 @@ def build_sc02_counterexample_surgeries() -> tuple[list[SurgeryRequest], ShiftCo
     return surgeries, shift_config
 
 
-def build_sc03_end_of_shift_boundary() -> tuple[list[SurgeryRequest], ShiftConfig]:
-    """Retorna SC-03 testando esterilização passiva após H=18:00 e rejeição de f_i > H."""
+def build_case03_shift_window() -> tuple[list[SurgeryRequest], ShiftConfig]:
+    """Retorna CASE-03: janela de troca de plantão [12:00, 13:00] e salto r_1 = B."""
     surgeries = [
         SurgeryRequest(
-            surgery_id="S_END",
-            start_time=1040,   # 17:20
-            finish_time=1070,  # 17:50
+            surgery_id="S1",
+            start_time=600,   # 10:00
+            finish_time=690,  # 11:30
             surgery_type=SurgeryType.CONTAMINATED,
-            sterilization_duration=30,  # e = 18:20 (1100 > 1080), porém f = 17:50 <= H
+            sterilization_duration=60,  # e_1 = 12:30 dentro de [12:00, 13:00) -> r_1 = 13:00
         ),
         SurgeryRequest(
-            surgery_id="S_OVER",
-            start_time=1050,   # 17:30
-            finish_time=1081,  # 18:01 > H (inviável)
+            surgery_id="S2",
+            start_time=690,   # 11:30
+            finish_time=750,  # 12:30 (invade [12:00, 13:00) -> descartada)
+            surgery_type=SurgeryType.CLEAN,
+        ),
+        SurgeryRequest(
+            surgery_id="S3",
+            start_time=750,   # 12:30
+            finish_time=840,  # 14:00 (invade [12:00, 13:00) -> descartada)
+            surgery_type=SurgeryType.CLEAN,
+        ),
+        SurgeryRequest(
+            surgery_id="S4",
+            start_time=780,   # 13:00 (>= r_1 = 13:00)
+            finish_time=900,  # 15:00
+            surgery_type=SurgeryType.CONTAMINATED,
+            sterilization_duration=30,  # r_4 = 15:30
+        ),
+        SurgeryRequest(
+            surgery_id="S5",
+            start_time=930,   # 15:30 (>= r_4 = 15:30)
+            finish_time=1050, # 17:30
             surgery_type=SurgeryType.CLEAN,
         ),
     ]
-    shift_config = ShiftConfig(closing_horizon=DEFAULT_CLOSING_HORIZON)
+    shift_config = ShiftConfig(
+        closing_horizon=DEFAULT_CLOSING_HORIZON,
+        shift_window=DEFAULT_SHIFT_WINDOW,
+    )
     return surgeries, shift_config
 
 
-def build_sc04_shift_window_scenarios() -> tuple[dict[str, list[SurgeryRequest]], ShiftConfig]:
-    """Retorna subcenários SC-04a, SC-04b e SC-04c sob janela de troca [12:00, 13:00]."""
-    shift_config = ShiftConfig(
-        closing_horizon=DEFAULT_CLOSING_HORIZON,
-        shift_window=DEFAULT_SHIFT_WINDOW,
-    )
-    scenarios = {
-        "SC-04a": [
-            SurgeryRequest(surgery_id="OVER_LEFT", start_time=690, finish_time=735),   # 11:30-12:15
-            SurgeryRequest(surgery_id="OVER_RIGHT", start_time=750, finish_time=810),  # 12:30-13:30
-            SurgeryRequest(surgery_id="TOUCH_PRE", start_time=660, finish_time=720),   # 11:00-12:00
-            SurgeryRequest(surgery_id="TOUCH_POST", start_time=780, finish_time=840),  # 13:00-14:00
-        ],
-        "SC-04b": [
-            SurgeryRequest(
-                surgery_id="ABSORBED",
-                start_time=675,   # 11:15
-                finish_time=705,  # 11:45
-                surgery_type=SurgeryType.CONTAMINATED,
-                sterilization_duration=30,
-            ),
-            SurgeryRequest(
-                surgery_id="NEXT_AT_B",
-                start_time=780,   # 13:00
-                finish_time=840,  # 14:00
-            ),
-        ],
-        "SC-04c": [
-            SurgeryRequest(
-                surgery_id="OVERFLOW",
-                start_time=675,   # 11:15
-                finish_time=705,  # 11:45
-                surgery_type=SurgeryType.CONTAMINATED,
-                sterilization_duration=90,
-            ),
-            SurgeryRequest(
-                surgery_id="BLOCKED_AT_B",
-                start_time=780,   # 13:00 < 13:15
-                finish_time=840,  # 14:00
-            ),
-            SurgeryRequest(
-                surgery_id="VALID_AFTER_RELEASE",
-                start_time=795,   # 13:15 >= 13:15
-                finish_time=855,  # 14:15
-            ),
-        ],
-    }
-    return scenarios, shift_config
-
-
-def build_sc05_edge_case_scenarios() -> tuple[
-    tuple[list[SurgeryRequest], ShiftConfig],
-    tuple[list[SurgeryRequest], ShiftConfig],
-]:
-    """Retorna subcasos de borda SC-05 (todas inviáveis e empate em r_i)."""
-    shift_config = ShiftConfig(
-        closing_horizon=DEFAULT_CLOSING_HORIZON,
-        shift_window=DEFAULT_SHIFT_WINDOW,
-    )
-    all_infeasible = [
-        SurgeryRequest(surgery_id="INF_WIN_1", start_time=700, finish_time=740),
-        SurgeryRequest(surgery_id="INF_WIN_2", start_time=720, finish_time=760),
-        SurgeryRequest(surgery_id="INF_HORIZON", start_time=1020, finish_time=1090),
-    ]
-    tie_on_release = [
+def build_case04_full_mixed_shift() -> tuple[list[SurgeryRequest], ShiftConfig]:
+    """Retorna CASE-04: turno hospitalar completo com 7 cirurgias mistas (ótimo = 4)."""
+    surgeries = [
         SurgeryRequest(
-            surgery_id="TIE_ABSORBED",
-            start_time=675,   # 11:15
+            surgery_id="S1",
+            start_time=480,   # 08:00
+            finish_time=570,  # 09:30
+            surgery_type=SurgeryType.CONTAMINATED,
+            sterilization_duration=60,  # r_1 = 10:30
+        ),
+        SurgeryRequest(
+            surgery_id="S2",
+            start_time=540,   # 09:00
+            finish_time=615,  # 10:15
+            surgery_type=SurgeryType.CLEAN,  # r_2 = 10:15 (< r_1)
+        ),
+        SurgeryRequest(
+            surgery_id="S3",
+            start_time=615,   # 10:15
             finish_time=705,  # 11:45
             surgery_type=SurgeryType.CONTAMINATED,
-            sterilization_duration=45,  # e = 12:30 -> clamp r_i = 780
+            sterilization_duration=45,  # e_3 = 12:30 -> r_3 = 13:00
         ),
         SurgeryRequest(
-            surgery_id="TIE_EXACT_B",
-            start_time=660,   # 11:00
-            finish_time=720,  # 12:00
-            surgery_type=SurgeryType.CONTAMINATED,
-            sterilization_duration=60,  # e = 13:00 -> r_i = 780
+            surgery_id="S4",
+            start_time=705,   # 11:45
+            finish_time=765,  # 12:45 (sobrepõe [12:00, 13:00) -> descartada)
+            surgery_type=SurgeryType.CLEAN,
         ),
         SurgeryRequest(
-            surgery_id="FOLLOWUP",
+            surgery_id="S5",
             start_time=780,   # 13:00
-            finish_time=840,  # 14:00
+            finish_time=870,  # 14:30
+            surgery_type=SurgeryType.CONTAMINATED,
+            sterilization_duration=90,  # r_5 = 16:00
+        ),
+        SurgeryRequest(
+            surgery_id="S6",
+            start_time=840,   # 14:00
+            finish_time=930,  # 15:30
+            surgery_type=SurgeryType.CLEAN,  # r_6 = 15:30 (< r_5)
+        ),
+        SurgeryRequest(
+            surgery_id="S7",
+            start_time=930,   # 15:30
+            finish_time=1060, # 17:40
+            surgery_type=SurgeryType.CONTAMINATED,
+            sterilization_duration=40,  # r_7 = 18:20 (> H, mas f_7 <= H)
         ),
     ]
-    return (all_infeasible, shift_config), (tie_on_release, shift_config)
+    shift_config = ShiftConfig(
+        closing_horizon=DEFAULT_CLOSING_HORIZON,
+        shift_window=DEFAULT_SHIFT_WINDOW,
+    )
+    return surgeries, shift_config
 
 
 def get_scenario_presets() -> tuple[ScenarioPreset, ...]:
-    """Retorna todos os cenários canônicos SC-01 a SC-05 prontos para exibição na UI."""
-    sc01_surgeries = build_sc01_classic_homogeneous_surgeries()
-    sc02_surgeries, sc02_cfg = build_sc02_counterexample_surgeries()
-    sc03_surgeries, sc03_cfg = build_sc03_end_of_shift_boundary()
-    sc04_map, sc04_cfg = build_sc04_shift_window_scenarios()
-    (sc05a_surgeries, sc05a_cfg), (sc05b_surgeries, sc05b_cfg) = (
-        build_sc05_edge_case_scenarios()
-    )
+    """Retorna os 4 cenários didáticos prontos para demonstração na interface."""
+    case01_surgeries, case01_cfg = build_case01_classic_baseline()
+    case02_surgeries, case02_cfg = build_case02_sterilization_and_horizon()
+    case03_surgeries, case03_cfg = build_case03_shift_window()
+    case04_surgeries, case04_cfg = build_case04_full_mixed_shift()
 
     return (
         ScenarioPreset(
-            scenario_id="SC-01",
-            title="SC-01 — Linha de Base Clássica (Homogêneo)",
+            scenario_id="CASE-01",
+            title="1. Baseline Clássico (Apenas Cirurgias Limpas)",
             description=(
-                "8 cirurgias limpas (c_i = 0) sem janela de plantão; "
-                "clássicos e adaptados convergem para o ótimo igual a 5."
+                "4 cirurgias limpas (c_i = 0) sem janela de plantão. "
+                "Mostra o funcionamento idêntico dos 4 algoritmos convergindo para {S1, S3, S4} (3 cirurgias)."
             ),
-            surgeries=tuple(sc01_surgeries),
-            shift_config=None,
+            surgeries=tuple(case01_surgeries),
+            shift_config=case01_cfg,
         ),
         ScenarioPreset(
-            scenario_id="SC-02",
-            title="SC-02 — Contrexemplo Canônico de 3 Cirurgias",
+            scenario_id="CASE-02",
+            title="2. Impacto da Esterilização (c_i) e Horizonte (H)",
             description=(
-                "Prova de não-redutibilidade: S1 (13:00-14:00 + 2h) engana o Guloso "
-                "Clássico, S3 (15:00-17:45 + 1h) engana a Redução Ingênua; "
-                "apenas os adaptados atingem o ótimo {S2, S3} = 2."
+                "Contrexemplo principal: S1 (13:00-14:00 + 2h de ozônio) engana os clássicos, "
+                "gerando conflito com S3 (15:00-17:45 + 1h após H=18:00). "
+                "Os adaptados encontram o ótimo válido {S2, S3} (2 cirurgias)."
             ),
-            surgeries=tuple(sc02_surgeries),
-            shift_config=sc02_cfg,
+            surgeries=tuple(case02_surgeries),
+            shift_config=case02_cfg,
         ),
         ScenarioPreset(
-            scenario_id="SC-03",
-            title="SC-03 — Esterilização Passiva Além do Horizonte H",
+            scenario_id="CASE-03",
+            title="3. Janela de Troca de Plantão [A, B]",
             description=(
-                "S_END encerra atuação médica às 17:50 (<= 18:00) com esterilização até "
-                "18:20 e é aceita; S_OVER termina às 18:01 e é descartada."
+                "Janela [12:00, 13:00]: S2 e S3 invadem a troca com equipe ativa e são descartadas; "
+                "a esterilização de S1 termina às 12:30 dentro da pausa, ajustando r_1 para 13:00 e liberando {S1, S4, S5}."
             ),
-            surgeries=tuple(sc03_surgeries),
-            shift_config=sc03_cfg,
+            surgeries=tuple(case03_surgeries),
+            shift_config=case03_cfg,
         ),
         ScenarioPreset(
-            scenario_id="SC-04a",
-            title="SC-04a — Sobreposição Ativa na Janela [12:00, 13:00]",
+            scenario_id="CASE-04",
+            title="4. Turno Hospitalar Completo (7 Cirurgias Mistas)",
             description=(
-                "Cirurgias com equipe ativa dentro de [12:00, 13:00) são descartadas, "
-                "enquanto toques exatos nas fronteiras (11:00-12:00 e 13:00-14:00) são aceitos."
+                "Turno de 08:00 às 18:00 com pausa [12:00, 13:00] e 7 cirurgias mistas: "
+                "evidencia busca binária p[i], preenchimento de DP[i], backtracking e 4 cirurgias válidas ({S2, S3, S6, S7})."
             ),
-            surgeries=tuple(sc04_map["SC-04a"]),
-            shift_config=sc04_cfg,
-        ),
-        ScenarioPreset(
-            scenario_id="SC-04b",
-            title="SC-04b — Esterilização Absorvida pela Pausa [12:00, 13:00]",
-            description=(
-                "Cirurgia 11:15-11:45 com 30m de ozônio termina esterilização às 12:15 "
-                "(dentro da troca de plantão); liberação efetiva ajustada para r_i = 13:00."
-            ),
-            surgeries=tuple(sc04_map["SC-04b"]),
-            shift_config=sc04_cfg,
-        ),
-        ScenarioPreset(
-            scenario_id="SC-04c",
-            title="SC-04c — Esterilização Transbordando a Pausa [12:00, 13:00]",
-            description=(
-                "Cirurgia 11:15-11:45 com 90m de esterilização libera a sala somente às "
-                "13:15 (r_i = 795), bloqueando 13:00-14:00 e permitindo 13:15-14:15."
-            ),
-            surgeries=tuple(sc04_map["SC-04c"]),
-            shift_config=sc04_cfg,
-        ),
-        ScenarioPreset(
-            scenario_id="SC-05a",
-            title="SC-05a — Borda: Todas as Cirurgias Inviáveis",
-            description=(
-                "Todas as cirurgias violam [12:00, 13:00) ou H=18:00, resultando em "
-                "cardinalidade 0 e contagem precisa de descartes."
-            ),
-            surgeries=tuple(sc05a_surgeries),
-            shift_config=sc05a_cfg,
-        ),
-        ScenarioPreset(
-            scenario_id="SC-05b",
-            title="SC-05b — Borda: Empate em Liberação Efetiva r_i",
-            description=(
-                "TIE_ABSORBED e TIE_EXACT_B possuem r_i idêntico (13:00 = 780) com f_i "
-                "distintos, permitindo desempate determinístico seguido de FOLLOWUP."
-            ),
-            surgeries=tuple(sc05b_surgeries),
-            shift_config=sc05b_cfg,
+            surgeries=tuple(case04_surgeries),
+            shift_config=case04_cfg,
         ),
     )
 
