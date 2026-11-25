@@ -264,9 +264,9 @@ function buildGanttSvg(
   const height = Math.max(120, margin.top + margin.bottom + Math.max(1, items.length) * rowHeight);
 
   const domain = sharedDomain || computeGanttDomain(items, shiftConfig);
-  const pad = Math.max(30, Math.round((domain.maxT - domain.minT) * 0.08));
-  const domainStart = Math.max(0, domain.minT - pad);
-  const domainEnd = domain.maxT + pad;
+  const domainStart = Math.max(0, Math.floor((domain.minT - 15) / 30) * 30);
+  const domainEnd = Math.max(domainStart + 60, Math.ceil((domain.maxT + 15) / 30) * 30);
+  const tickStep = domainEnd - domainStart > 720 ? 60 : 30;
   const plotWidth = width - margin.left - margin.right;
 
   const scaleX = (t) => margin.left + ((t - domainStart) / Math.max(1, domainEnd - domainStart)) * plotWidth;
@@ -290,10 +290,8 @@ function buildGanttSvg(
   defs.appendChild(pattern);
   svg.appendChild(defs);
 
-  // Grade horária
-  const tickCount = 7;
-  for (let i = 0; i <= tickCount; i += 1) {
-    const tVal = Math.round(domainStart + ((domainEnd - domainStart) * i) / tickCount);
+  // Grade horária fixa (de 30 em 30 min, ou 60 min para turnos > 12h)
+  for (let tVal = domainStart; tVal <= domainEnd; tVal += tickStep) {
     const x = scaleX(tVal);
     svg.appendChild(createSvgElement("line", {
       x1: x,
@@ -307,7 +305,7 @@ function buildGanttSvg(
       x,
       y: height - 8,
       "text-anchor": "middle",
-      "font-size": "11",
+      "font-size": "10",
       fill: "#64748b",
     });
     label.textContent = formatMinutes(tVal);
