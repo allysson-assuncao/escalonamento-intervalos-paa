@@ -32,7 +32,10 @@
       </section>
 
       <section class="card">
-        <h2>Restrições do Turno</h2>
+        <div class="card-header-row">
+          <h2>Restrições do Turno</h2>
+          <button type="button" id="apply-shift-btn" class="btn btn-secondary">Aplicar Turno</button>
+        </div>
         <label class="checkbox-row">
           <input type="checkbox" id="shift-enabled-checkbox" checked />
           <span>Aplicar horizonte H e janela de plantão</span>
@@ -162,7 +165,7 @@
               <div class="formula-code" id="summary-decision-formula">—</div>
             </div>
           </div>
-          <div class="table-scroll">
+          <div class="table-container">
             <table class="data-table" id="summary-phases-table">
               <thead>
                 <tr>
@@ -219,7 +222,7 @@
             <h2>Comparativo Lado a Lado dos 4 Algoritmos</h2>
             <button type="button" id="run-compare-btn" class="btn btn-primary">Atualizar Comparação</button>
           </div>
-          <div class="table-scroll">
+          <div class="table-container">
             <table class="data-table" id="compare-summary-table">
               <thead>
                 <tr>

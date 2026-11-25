@@ -173,11 +173,13 @@ Toda a visualização roda isoladamente em [`src/ui/`](../src/ui/__init__.py#L1-
    - [`_audit_physical_conflicts`](../src/ui/tracer.py#L841-L873) e [`run_comparative_arena`](../src/ui/tracer.py#L876-L898): executam os 4 algoritmos e detectam conflitos físicos nas agendas clássicas.
 3. **Servidor HTTP Local ([`src/ui/server.py`](../src/ui/server.py#L27-L317))**:
    - Sobe `ThreadingHTTPServer` em `127.0.0.1:8765` ([`create_http_server`](../src/ui/server.py#L306-L317)), expondo `GET /api/scenarios`, `POST /api/trace` ([`_handle_trace_request`](../src/ui/server.py#L123-L140)) e `POST /api/compare` ([`_handle_compare_request`](../src/ui/server.py#L143-L154)).
-4. **Frontend Enxuto em 2 Abas ([`src/ui/static/index.html`](../src/ui/static/index.html#L1-L246) e [`src/ui/static/app.js`](../src/ui/static/app.js#L1-L941))**:
+4. **Frontend Enxuto em 2 Abas ([`src/ui/static/index.html`](../src/ui/static/index.html#L1-L249) e [`src/ui/static/app.js`](../src/ui/static/app.js#L1-L964))**:
+   - **Cenário Customizado e Turno em Tempo Real**: além dos 4 casos padrão, [`loadPresetById`](../src/ui/static/app.js#L204-L225) oferece a 5ª opção `5. Cenário Customizado (Em Branco)` (`CUSTOM`), e editar $H$ ou $[A, B]$ (ou clicar em `Aplicar Turno`) atualiza o Gantt imediatamente.
    - [`attachHhmmInputMask`](../src/ui/static/app.js#L37-L49) e [`parseHhmmToMinutes`](../src/ui/static/app.js#L51-L63): máscara e validação `HH:MM`.
-   - [`renderComplexitySummary`](../src/ui/static/app.js#L456-L482): preenche o card de fórmulas e complexidade por fase.
-   - [`computeGanttDomain`](../src/ui/static/app.js#L218-L242) e [`buildGanttSvg`](../src/ui/static/app.js#L244-L454): desenham barras ativas, hachuras de esterilização, $[A, B]$, $H$ e `last_release_minutes`.
-   - [`renderVariablesWatch`](../src/ui/static/app.js#L500-L515), [`renderArraysInspector`](../src/ui/static/app.js#L517-L605) e [`runComparisonArena`](../src/ui/static/app.js#L699-L775): atualizam variáveis, tabela `Ordered[i]/r_i/p[i]/DP[i]` e os 4 mini-Gantts alinhados na mesma escala.
+   - [`renderComplexitySummary`](../src/ui/static/app.js#L465-L491): preenche o card de fórmulas e complexidade por fase.
+   - [`computeGanttDomain`](../src/ui/static/app.js#L227-L251) e [`buildGanttSvg`](../src/ui/static/app.js#L253-L463): desenham barras ativas, hachuras de esterilização, $[A, B]$, $H$ e `last_release_minutes`.
+   - [`renderVariablesWatch`](../src/ui/static/app.js#L509-L524) e [`renderArraysInspector`](../src/ui/static/app.js#L526-L614): exibem as variáveis locais do passo atual em `HH:MM (min)` e a tabela de vetores (`Ordered[i]`, `r_i`, `p[i]`, `DP[i]`) destacando em **amarelo** o índice ativo `i`, em **lilás** a janela `[lo, hi]` da busca binária e em **azul** o índice referenciado (`mid` ou `p[i]`).
+   - [`runComparisonArena`](../src/ui/static/app.js#L708-L784): exibe os 4 algoritmos lado a lado sem scroll interno na tabela e alinha os 4 mini-Gantts na mesma escala horizontal.
 
 ---
 

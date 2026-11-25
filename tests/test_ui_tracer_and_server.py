@@ -207,11 +207,14 @@ class TestHttpServerAndCliHappyPath:
             assert marker in raw
 
         html_text = Path("src/ui/static/index.html").read_text(encoding="utf-8")
+        app_js = Path("src/ui/static/app.js").read_text(encoding="utf-8")
         assert html_text.count('class="tab-btn') == 2
         assert "complexity-summary-card" in html_text
+        assert "apply-shift-btn" in html_text
         assert "tab-benchmark" not in html_text
         assert "presorted-checkbox" not in html_text
         assert "generate-btn" not in html_text
+        assert 'scenarioId === "CUSTOM"' in app_js
 
         status, ctype, raw = _http_request(host, port, "GET", "/api/scenarios")
         assert status == 200

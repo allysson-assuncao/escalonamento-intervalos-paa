@@ -202,6 +202,15 @@ function renderSurgeriesEditorTable() {
 }
 
 function loadPresetById(scenarioId) {
+  if (scenarioId === "CUSTOM") {
+    appState.surgeries = [];
+    appState.shiftConfig = { closing_horizon: 1080, shift_window: null };
+    document.getElementById("preset-description").textContent =
+      "Cenário em branco: configure o horizonte H, a janela [A, B] e adicione cirurgias personalizadas abaixo.";
+    syncShiftConfigToDom(appState.shiftConfig);
+    renderSurgeriesEditorTable();
+    return;
+  }
   const preset = appState.presets.find((p) => p.scenario_id === scenarioId);
   if (!preset) {
     return;
@@ -802,6 +811,10 @@ async function initApp() {
       opt.textContent = preset.title;
       select.appendChild(opt);
     }
+    const customOpt = document.createElement("option");
+    customOpt.value = "CUSTOM";
+    customOpt.textContent = "5. Cenário Customizado (Em Branco)";
+    select.appendChild(customOpt);
     const defaultId = appState.presets.some((p) => p.scenario_id === "CASE-02")
       ? "CASE-02"
       : appState.presets[0]?.scenario_id;
@@ -836,22 +849,32 @@ async function initApp() {
 
   document.getElementById("shift-enabled-checkbox").addEventListener("change", (e) => {
     document.getElementById("shift-fields").classList.toggle("hidden", !e.target.checked);
+    runActiveTabSimulation();
   });
   document.getElementById("window-enabled-checkbox").addEventListener("change", (e) => {
     document.getElementById("window-fields").classList.toggle("hidden", !e.target.checked);
+    runActiveTabSimulation();
   });
+  document.getElementById("apply-shift-btn").addEventListener("click", runActiveTabSimulation);
   document.querySelectorAll(".hhmm-input").forEach(attachHhmmInputMask);
 
-  document.getElementById("horizon-input").addEventListener("input", () => {
-    try {
-      const minutes = parseHhmmToMinutes(
-        document.getElementById("horizon-input").value,
-        "Horizonte H"
-      );
-      document.getElementById("horizon-hhmm").textContent = `${minutes} min`;
-    } catch {
-      document.getElementById("horizon-hhmm").textContent = "-- min";
-    }
+  ["horizon-input", "window-start-input", "window-end-input"].forEach((inputId) => {
+    const el = document.getElementById(inputId);
+    el.addEventListener("input", () => {
+      if (inputId === "horizon-input") {
+        try {
+          const minutes = parseHhmmToMinutes(el.value, "Horizonte H");
+          document.getElementById("horizon-hhmm").textContent = `${minutes} min`;
+        } catch {
+          document.getElementById("horizon-hhmm").textContent = "-- min";
+        }
+      }
+      if (/^\d{2}:\d{2}$/.test(el.value.trim())) {
+        runActiveTabSimulation();
+      }
+    });
+    el.addEventListener("change", runActiveTabSimulation);
+    el.addEventListener("blur", runActiveTabSimulation);
   });
 
   document.getElementById("new-type").addEventListener("change", (e) => {

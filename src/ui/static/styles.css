@@ -245,6 +245,12 @@ select {
   border-radius: 6px;
 }
 
+.table-container {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
 .mini-table,
 .data-table {
   width: 100%;
