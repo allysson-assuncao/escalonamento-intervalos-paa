@@ -8,9 +8,10 @@ import pytest
 REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 DOCS_DIR: Path = REPO_ROOT / "docs"
 README_PATH: Path = REPO_ROOT / "README.md"
+MATH_DOC_PATH: Path = DOCS_DIR / "formulacao-matematica-e-comparativo-algoritmos.md"
 GUIDE_PATH: Path = DOCS_DIR / "guia-revisao-arquitetura-e-apresentacao.md"
 
-DOC_FILES: tuple[Path, ...] = (README_PATH, GUIDE_PATH)
+DOC_FILES: tuple[Path, ...] = (README_PATH, MATH_DOC_PATH, GUIDE_PATH)
 
 _LINK_PATTERN = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _LINE_ANCHOR_PATTERN = re.compile(r"^L(\d+)(?:-L(\d+))?$")
@@ -87,9 +88,19 @@ class TestDocumentationIntegrityHappyPath:
             "Problema Original vs. Adaptação Autoral",
             "Contrexemplo `CASE-02`",
             "Instalação, Execução e Testes",
+            "docs/formulacao-matematica-e-comparativo-algoritmos.md",
             "docs/guia-revisao-arquitetura-e-apresentacao.md",
         ):
             assert marker in readme
+
+        math_doc = MATH_DOC_PATH.read_text(encoding="utf-8")
+        for marker in (
+            "Dicionário Completo de Notação",
+            "Comparativo Matemático dos 4 Algoritmos",
+            "CASE-02",
+            "CASE-03",
+        ):
+            assert marker in math_doc
 
         guide = GUIDE_PATH.read_text(encoding="utf-8")
         for marker in (

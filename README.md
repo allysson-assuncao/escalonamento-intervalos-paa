@@ -149,4 +149,5 @@ python -m src.main --scenario CASE-04 --algorithm adapted_dp
 
 ## 6. Documentação Complementar
 
-- 🎓 **[Guia de Revisão, Arquitetura e Preparação para Apresentação](docs/guia-revisao-arquitetura-e-apresentacao.md)**: explicação objetiva da arquitetura SOLID, mapa de funções com links `#Lxx-Lyy`, funcionamento da interface em 2 abas, roteiro de apresentação ao vivo e respostas às perguntas da banca.
+- 📐 **[Formulação Matemática e Comparativo Algorítmico](docs/formulacao-matematica-e-comparativo-algoritmos.md)**: dicionário completo de notação ($s_i, f_i, c_i, H, [A, B], e_i, r_i, p(i), DP[i]$), comparação matemática formal entre as abordagens clássicas e adaptadas, testes de mesa em `CASE-02`/`CASE-03` e dedução de complexidade.
+- 🎓 **[Guia de Revisão, Arquitetura e Preparação para Apresentação](docs/guia-revisao-arquitetura-e-apresentacao.md)**: explicação detalhada dos métodos principais com parâmetros, retornos e fluxo interno (`#Lxx-Lyy`), funcionamento do tracer/interface em 2 abas, checklist guiado de validação da UI (`Ação → Resultado`), roteiro em dupla no DataShow e FAQ da banca.
